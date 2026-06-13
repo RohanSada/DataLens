@@ -1,0 +1,45 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      AUTH_REQUIRE_ENABLED: "false"
+      DEBUG_MODE: "true"
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_STORAGE_DIR: /app/data/uploads
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  web-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.web-dev
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api

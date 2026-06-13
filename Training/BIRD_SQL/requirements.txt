@@ -1,0 +1,15 @@
+# Dependencies for the BIRD Text-to-SQL dataset builder.
+#
+# Always required:
+sqlglot>=23.0.0          # gold-SQL table extraction (gold_union + --report-coverage)
+pydantic>=2.0            # schema_retrieval Settings model (used by schema_loader)
+
+# Required only for the retrieval-based strategies (--schema-strategy retrieved
+# or gold_union), reused from the sibling schema_retrieval package. These also
+# need a running Qdrant + Neo4j with the schemas pre-ingested:
+#   sentence-transformers
+#   qdrant-client
+#   neo4j
+#
+# The default --schema-strategy full needs no servers and only the two packages
+# above (plus the Python stdlib for sqlite sampling).

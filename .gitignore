@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Data, models and run outputs (large; regenerate with the CLI)
+/data/
+/checkpoints/
+/runs/
+/.cache/
+/wandb/
+
+# Local config
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

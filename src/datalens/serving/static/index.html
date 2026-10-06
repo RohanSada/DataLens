@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DataLens</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --line: #e1e0d9;
+    --accent: #2a78d6;
+    --accent-ink: #ffffff;
+    --bad: #d03b3b;
+    --code: #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --line: #2c2c2a;
+      --accent: #3987e5;
+      --code: #232322;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--ink-2); margin: 0 0 24px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+  select, input, textarea {
+    width: 100%; font: inherit; color: var(--ink); background: var(--page);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  .row { display: grid; grid-template-columns: 1fr 140px; gap: 12px; }
+  .field { margin-bottom: 14px; }
+  button {
+    font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 8px; padding: 10px 18px; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  pre { background: var(--code); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0; font-size: 13px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .error { color: var(--bad); }
+  .table-wrap { overflow-x: auto; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--ink-2); font-weight: 600; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .cand { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .cand:first-of-type { border-top: 0; }
+  .votes { font-size: 13px; color: var(--ink-2); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .chosen { font-size: 12px; font-weight: 600; color: var(--accent); }
+  [hidden] { display: none !important; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } .cand { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>DataLens</h1>
+  <p class="sub">Ask a question about a database. The model samples several SQL queries, runs each one read-only, and returns the answer most of them agree on.</p>
+
+  <form class="card" id="form">
+    <div class="row">
+      <div class="field">
+        <label for="db">Database</label>
+        <select id="db" required></select>
+      </div>
+      <div class="field">
+        <label for="samples">Samples</label>
+        <input id="samples" type="number" min="1" max="16" value="5">
+      </div>
+    </div>
+    <div class="field">
+      <label for="question">Question</label>
+      <textarea id="question" required placeholder="Which school has the highest average SAT math score?"></textarea>
+    </div>
+    <div class="field">
+      <label for="evidence">External knowledge (optional)</label>
+      <input id="evidence" placeholder="e.g. eligible free rate = Free Meal Count / Enrollment">
+    </div>
+    <button id="submit" type="submit">Ask</button>
+  </form>
+
+  <section class="card" id="answer" hidden>
+    <h2>Query</h2>
+    <pre id="sql"></pre>
+    <div class="meta" id="meta"></div>
+    <div class="error" id="error" hidden></div>
+    <div class="table-wrap"><table id="result"></table></div>
+  </section>
+
+  <section class="card" id="candidates" hidden>
+    <h2>Candidates by vote</h2>
+    <div id="cand-list"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+
+function el(tag, text, cls) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (cls) node.className = cls;
+  return node;
+}
+
+async function loadDatabases() {
+  const select = $("db");
+  try {
+    const res = await fetch("/v1/databases");
+    const dbs = await res.json();
+    select.replaceChildren(...dbs.map((d) => {
+      const opt = el("option", `${d.db_id} (${d.tables.length} tables)`);
+      opt.value = d.db_id;
+      return opt;
+    }));
+    if (!dbs.length) select.replaceChildren(el("option", "No databases found in DATALENS_DB_DIR"));
+  } catch (err) {
+    select.replaceChildren(el("option", "Could not reach the API"));
+  }
+}
+
+function renderTable(columns, rows, truncated) {
+  const table = $("result");
+  table.replaceChildren();
+  if (!columns.length) return;
+  const head = el("tr");
+  columns.forEach((c) => head.appendChild(el("th", c)));
+  table.appendChild(head);
+  rows.forEach((row) => {
+    const tr = el("tr");
+    row.forEach((v) => tr.appendChild(el("td", v === null ? "NULL" : String(v))));
+    table.appendChild(tr);
+  });
+  if (truncated) $("meta").textContent += " · results truncated";
+}
+
+function renderCandidates(candidates, total) {
+  const list = $("cand-list");
+  list.replaceChildren();
+  candidates.forEach((c) => {
+    const row = el("div", undefined, "cand");
+    const left = el("div");
+    left.appendChild(el("div", c.ok ? `${c.votes} of ${total} votes` : "failed", "votes"));
+    const bar = el("div", undefined, "bar");
+    const fill = el("span");
+    fill.style.width = `${Math.round((100 * c.votes) / Math.max(total, 1))}%`;
+    bar.appendChild(fill);
+    left.appendChild(bar);
+    if (c.chosen) left.appendChild(el("div", "chosen", "chosen"));
+    const right = el("div");
+    right.appendChild(el("pre", c.sql || "(no SQL)"));
+    if (c.error) right.appendChild(el("div", c.error, "meta error"));
+    row.append(left, right);
+    list.appendChild(row);
+  });
+}
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("submit");
+  button.disabled = true;
+  button.textContent = "Thinking…";
+  const samples = Number($("samples").value) || 1;
+  try {
+    const res = await fetch("/v1/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        db_id: $("db").value,
+        question: $("question").value,
+        evidence: $("evidence").value,
+        samples,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    $("answer").hidden = false;
+    $("sql").textContent = data.sql || "(the model returned no SQL)";
+    $("meta").textContent = `${data.model} · ${Math.round(data.latency_ms)} ms · ${data.rows.length} rows`;
+    $("error").hidden = !data.error;
+    $("error").textContent = data.error || "";
+    renderTable(data.columns, data.rows, data.truncated);
+    $("candidates").hidden = samples < 2;
+    renderCandidates(data.candidates, samples);
+  } catch (err) {
+    $("answer").hidden = false;
+    $("sql").textContent = "";
+    $("error").hidden = false;
+    $("error").textContent = String(err.message || err);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Ask";
+  }
+});
+
+loadDatabases();
+</script>
+</body>
+</html>

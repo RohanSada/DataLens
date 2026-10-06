@@ -1,0 +1,30 @@
+# Frontier model, zero-shot, same prompt and schema as every other run.
+# Needs ANTHROPIC_API_KEY. Prices are USD per million tokens; check them before a run.
+run_name: frontier-claude-sonnet-5-5
+model:
+  name: Claude Sonnet 5.5 (zero-shot)
+  backend: anthropic
+  model: claude-sonnet-5-5
+  params_b: null               # not disclosed
+  group: frontier
+  training: none
+  backend_kwargs:
+    effort: high               # how much the model thinks before answering
+    concurrency: 8
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 64
+prompt:
+  reasoning: true              # same prompt as the fine-tuned models
+  num_examples: 3
+decoding:
+  greedy: true
+  greedy_temperature: null     # current Claude models reject custom sampling parameters
+  samples: 0                   # set >0 to measure self-consistency (costs n x as much)
+  temperature: null
+  max_tokens: 16000            # includes the model's own thinking
+pricing:
+  input_per_mtok: 2.0
+  output_per_mtok: 10.0
+  cache_read_per_mtok: 0.2
+  cache_write_per_mtok: 2.5   # 1.25x input for the 5-minute cache

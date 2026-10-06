@@ -33,6 +33,8 @@ train = [
     "peft>=0.17",
     "datasets>=3.0",
     "accelerate>=1.0",
+    # TRL's GRPO trainer imports requests but only declares it in its [vllm] extra.
+    "requests>=2.31",
 ]
 # Fast local generation for evaluation and GRPO rollouts (Linux + CUDA only).
 # Installed through TRL so the vLLM version is one its GRPO trainer supports.

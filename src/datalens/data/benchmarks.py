@@ -60,6 +60,13 @@ def resolve_spec(benchmark: str, root: str | Path) -> BenchmarkSpec:
     raise ValueError(f"unknown benchmark {benchmark!r}; expected bird-<split> or spider-<split>")
 
 
+def benchmark_label(benchmark: str) -> str:
+    """Display name for reports and figures, e.g. ``spider-dev`` -> ``Spider dev``."""
+    family, _, split = benchmark.partition("-")
+    name = {"bird": "BIRD", "spider": "Spider"}.get(family, family)
+    return f"{name} {split}".strip()
+
+
 def load_examples(spec: BenchmarkSpec, *, limit: int | None = None) -> list[Example]:
     """Load questions from a BIRD- or Spider-format JSON file.
 

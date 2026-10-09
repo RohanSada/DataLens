@@ -35,7 +35,8 @@ trainer:                       # passed to trl.SFTConfig
   bf16: true
   gradient_checkpointing: true
   logging_steps: 10
-  save_strategy: epoch
+  save_strategy: steps
+  save_steps: 100              # checkpoints let a rerun resume after a disconnect
   save_total_limit: 2
   report_to: none
   model_init_kwargs:

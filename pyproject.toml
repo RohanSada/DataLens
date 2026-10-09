@@ -35,6 +35,8 @@ train = [
     "accelerate>=1.0",
     # TRL's GRPO trainer imports requests but only declares it in its [vllm] extra.
     "requests>=2.31",
+    # TRL's trainers run a Triton kernel. CUDA builds of torch bring Triton; CPU builds don't.
+    "triton; sys_platform == 'linux'",
 ]
 # Fast local generation for evaluation and GRPO rollouts (Linux + CUDA only).
 # Installed through TRL so the vLLM version is one its GRPO trainer supports.

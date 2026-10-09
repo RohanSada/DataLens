@@ -2,7 +2,9 @@
 
 ``run(config)`` is the whole pipeline: filter BIRD train, build the dataset,
 train, save the adapter, then optionally merge it into a standalone model (what
-vLLM serves) and push that to the Hugging Face Hub.
+vLLM serves) and push that to the Hugging Face Hub. Running the same config again
+continues from the newest checkpoint in ``output_dir``, so a long job that was
+interrupted picks up where it stopped.
 """
 
 from __future__ import annotations
@@ -131,6 +133,12 @@ def export_model(config: TrainConfig, trainer: Any, tokenizer: Any) -> Path | No
     return merged_dir
 
 
+def _last_checkpoint(out: Path) -> str | None:
+    from transformers.trainer_utils import get_last_checkpoint
+
+    return get_last_checkpoint(str(out))
+
+
 def run(config: TrainConfig, *, model: Any = None, tokenizer: Any = None, dataset: Any = None) -> Path:
     """Train according to ``config``; returns the output directory."""
     out = Path(config.output_dir)
@@ -145,7 +153,10 @@ def run(config: TrainConfig, *, model: Any = None, tokenizer: Any = None, datase
     if config.method == "sft":
         dataset = dataset.remove_columns(["id"])  # SFT collators expect model inputs only
     trainer = make_trainer(config, dataset, tokenizer, model=model)
-    trainer.train()
+    checkpoint = _last_checkpoint(out) if config.resume else None
+    if checkpoint:
+        log.info("resuming from %s", checkpoint)
+    trainer.train(resume_from_checkpoint=checkpoint)
     trainer.save_model(str(out))
     trainer.save_state()
     export_model(config, trainer, tokenizer)

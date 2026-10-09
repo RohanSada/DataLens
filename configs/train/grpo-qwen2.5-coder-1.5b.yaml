@@ -55,7 +55,7 @@ trainer:                       # passed to trl.GRPOConfig
   bf16: true
   gradient_checkpointing: true
   logging_steps: 5
-  save_steps: 100
+  save_steps: 50               # checkpoints let a rerun resume after a disconnect
   save_total_limit: 2
   log_completions: true
   num_completions_to_print: 2

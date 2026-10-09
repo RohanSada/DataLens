@@ -104,14 +104,17 @@ page shows the vote.
 * **Scoring matches the official BIRD scripts.** EX is set equality of result rows; Soft-F1 and R-VES
   follow the mini-dev implementations, except that Soft-F1 sorts rows before pairing them (the
   official script pairs in Python set order, which is not reproducible between runs).
-* **Generation and scoring are separate.** `generations.jsonl` is written by the GPU job and is
-  append-only, so runs resume after a disconnect; scoring and reports run anywhere on CPU.
+* **Generation and scoring are separate, and long jobs resume.** `generations.jsonl` is written by
+  the GPU job and is append-only, and training checkpoints every 50 GRPO or 100 SFT steps, so
+  rerunning a command after a disconnect picks up where it stopped. Scoring and reports run anywhere
+  on CPU.
 * **The comparison is not quietly rigged.** Every model gets the same prompt text. Claude's schema
   prefix is prompt-cached, which lowers its cost, not its accuracy. Server-side model fallbacks are
   off, so a Claude result always comes from the model named in the table.
 * **The training code is tested end to end.** CI runs SFT and GRPO for two steps on a tiny randomly
-  initialised Qwen2 model on CPU, through the real TRL trainers, LoRA, the execution reward and the
-  merge step, so a broken config fails in seconds instead of on a rented GPU.
+  initialised Qwen2 model on CPU, through the real TRL trainers, LoRA, the execution reward, the
+  merge step and resuming from a checkpoint, so a broken config fails in seconds instead of on a
+  rented GPU.
 
 ## Compute (estimates, not measurements)
 

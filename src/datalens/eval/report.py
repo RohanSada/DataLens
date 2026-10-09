@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from datalens.data.benchmarks import benchmark_label
 from datalens.eval.config import EvalConfig
 from datalens.eval.generate import CONFIG_FILE
 from datalens.eval.metrics import load_scored, per_question_correct, summarize
@@ -235,7 +236,7 @@ def _cost_table(runs: list[Run]) -> list[str]:
 
 
 def write_markdown(runs: list[Run], pairs: list[PairResult], out: Path, figures: list[str]) -> Path:
-    benchmarks = sorted({r.config.benchmark for r in runs})
+    benchmarks = sorted({benchmark_label(r.config.benchmark) for r in runs})
     n_questions = sorted({r.summary["n"] for r in runs})
     sections = [
         "# Results",

@@ -1,6 +1,6 @@
 """Statistics for comparing models on the same questions.
 
-Every model answers the same 1,534 BIRD dev questions, so comparisons are
+Every model answers the same benchmark questions, so comparisons are
 *paired*: McNemar's test looks only at questions where exactly one model is
 right, and the paired bootstrap resamples questions, not models. With several
 small-vs-large pairs tested at once, p-values get a Holm-Bonferroni correction.

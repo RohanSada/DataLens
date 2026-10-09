@@ -8,6 +8,9 @@ from datalens.sql.compare import exec_match, result_key, soft_f1, ves_reward
 from datalens.sql.executor import ErrorKind, execute
 from datalens.sql.parse import extract_sql, is_read_only, schema_refs
 
+# A truncated model answer from a BIRD dev run: the unclosed quote stops sqlglot's tokenizer.
+_UNCLOSED_QUOTE = "SELECT f.School FROM frpm AS f ORDER BY f.`FRPM Count (K-12)` DESC LIMIT '"
+
 
 class TestExecute:
     def test_returns_rows_and_columns(self, shop_db):
@@ -142,10 +145,14 @@ class TestParse:
             "PRAGMA writable_schema = 1",
             "ATTACH DATABASE 'x.db' AS x",
             "not sql at all (",
+            _UNCLOSED_QUOTE,
         ],
     )
     def test_read_only_rejects_writes(self, sql):
         assert not is_read_only(sql)
+
+    def test_schema_refs_return_none_for_sql_that_wont_tokenize(self):
+        assert schema_refs(_UNCLOSED_QUOTE) is None
 
     def test_schema_refs_resolve_aliases(self):
         refs = schema_refs(

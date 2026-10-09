@@ -91,8 +91,42 @@ def test_schema_cache_roundtrip(shop_db, tmp_path):
 
 def test_quote_ident():
     assert quote_ident("name") == "name"
+    assert quote_ident("orders") == "orders"
+    assert quote_ident("order") == "`order`"
+    assert quote_ident("Group") == "`Group`"
     assert quote_ident("order date") == "`order date`"
     assert quote_ident("we`ird") == "`we``ird`"
+
+
+def test_introspection_handles_keyword_names(tmp_path):
+    """BIRD's financial database has a table called ``order``."""
+    import sqlite3
+
+    db = tmp_path / "financial.sqlite"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE account (account_id INTEGER PRIMARY KEY, "group" TEXT);
+        CREATE TABLE "order" (
+            order_id INTEGER PRIMARY KEY,
+            account_id INTEGER REFERENCES account (account_id),
+            "Free Meal Count (K-12)" REAL
+        );
+        INSERT INTO account VALUES (1, 'A');
+        INSERT INTO "order" VALUES (10, 1, 2.5);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    schema = introspect_sqlite(db)
+    assert schema.table_names() == ["account", "order"]
+    order = schema.tables[1]
+    assert [c.examples for c in order.columns] == [[10], [1], [2.5]]
+    assert order.foreign_keys[0].ref_table == "account"
+    text = schema.render()
+    assert "CREATE TABLE `order` (" in text and "`group` TEXT" in text
+    sqlite3.connect(tmp_path / "copy.sqlite").executescript(text)
 
 
 def test_prompt_parts_join_to_the_full_prompt(bird_root):

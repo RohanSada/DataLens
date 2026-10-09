@@ -1,0 +1,27 @@
+# Large open-weight model, zero-shot. Needs an 80GB GPU (or two with tensor_parallel_size: 2).
+run_name: frontier-qwen2.5-coder-32b
+model:
+  name: Qwen2.5-Coder-32B (zero-shot)
+  backend: vllm
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
+  params_b: 32
+  group: frontier
+  training: none
+  backend_kwargs:
+    max_model_len: 16384      # longest BIRD dev prompt plus max_tokens, with room to spare
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: true
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 0               # for maj@k / pass@k and self-consistency
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 2.5        # what one A100 80GB costs you per hour; edit to match
+  num_gpus: 1

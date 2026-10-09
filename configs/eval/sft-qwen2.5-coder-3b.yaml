@@ -1,0 +1,28 @@
+# SFT baseline. Uses the direct-answer prompt it was trained on.
+run_name: sft-qwen2.5-coder-3b
+model:
+  name: Qwen2.5-Coder-3B SFT
+  backend: vllm
+  model: checkpoints/sft-qwen2.5-coder-3b/merged
+  params_b: 3
+  group: fine-tuned
+  training: sft
+  backend_kwargs:
+    max_model_len: 16384      # longest BIRD dev prompt plus max_tokens, with room to spare
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+  train_fraction: 1.0
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: false
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 16               # for maj@k / pass@k and self-consistency
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 1.5        # what one A100 40GB costs you per hour; edit to match
+  num_gpus: 1

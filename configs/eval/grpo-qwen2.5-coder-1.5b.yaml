@@ -1,0 +1,27 @@
+# GRPO fine-tune. Point model at the merged checkpoint or its Hub id.
+run_name: grpo-qwen2.5-coder-1.5b
+model:
+  name: Qwen2.5-Coder-1.5B GRPO
+  backend: vllm
+  model: checkpoints/grpo-qwen2.5-coder-1.5b/merged
+  params_b: 1.5
+  group: fine-tuned
+  training: grpo
+  backend_kwargs:
+    max_model_len: 16384      # longest BIRD dev prompt plus max_tokens, with room to spare
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: true
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 16               # for maj@k / pass@k and self-consistency
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 1.5        # what one A100 40GB costs you per hour; edit to match
+  num_gpus: 1

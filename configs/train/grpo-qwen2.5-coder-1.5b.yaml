@@ -1,0 +1,64 @@
+# GRPO with the execution reward (Arctic-Text2SQL-R1 recipe), from the instruct model.
+# Fits a 24GB GPU (L4, A10) with LoRA and vLLM colocated for rollouts.
+run_name: grpo-qwen2.5-coder-1.5b
+method: grpo
+model: Qwen/Qwen2.5-Coder-1.5B-Instruct
+output_dir: checkpoints/grpo-qwen2.5-coder-1.5b
+
+data:
+  data_root: data/bird
+  benchmark: bird-train
+  train_fraction: 1.0
+  max_prompt_tokens: 4096
+  drop_failed_gold: true
+  drop_empty_gold: true
+  exclude_ids_file: null       # optional: see `datalens data exclude-solved`
+
+prompt:
+  reasoning: true              # <think> ... </think> then a ```sql block
+  num_examples: 3
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.0
+
+reward:
+  correct: 1.0                 # result set matches gold
+  executable: 0.1              # runs, wrong answer
+  invalid: 0.0                 # no query, or it fails
+  timeout_s: 10
+  format_weight: 0.0
+
+export:
+  merge_lora: true
+  hub_repo: null               # e.g. your-user/datalens-qwen2.5-coder-1.5b-grpo
+
+trainer:                       # passed to trl.GRPOConfig
+  max_steps: 400               # 400 steps x 8 prompts = 3,200 questions (about a third of an epoch)
+  learning_rate: 1.0e-5        # LoRA; use ~1e-6 for full fine-tuning
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 10
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 8   # 64 completions per step = 8 prompts x 8 rollouts
+  num_generations: 8
+  max_completion_length: 1024
+  temperature: 1.0
+  beta: 0.0                    # no KL penalty, so no reference model in memory
+  loss_type: dapo              # token-level loss normalisation
+  epsilon_high: 0.28           # DAPO clip-higher keeps exploration alive
+  mask_truncated_completions: true
+  use_vllm: true
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.4
+  vllm_max_model_length: 5632
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 5
+  save_steps: 100
+  save_total_limit: 2
+  log_completions: true
+  num_completions_to_print: 2
+  report_to: none
+  model_init_kwargs:
+    dtype: bfloat16

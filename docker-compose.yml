@@ -1,45 +1,43 @@
+# Two ways to run:
+#   GPU, your fine-tuned model:  docker compose --profile gpu up
+#   No GPU, Claude as the model:  DATALENS_BACKEND=anthropic DATALENS_MODEL=claude-sonnet-5-5 \
+#                                 ANTHROPIC_API_KEY=... docker compose up api
+# Then open http://localhost:8000
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+  vllm:
+    profiles: ["gpu"]
+    image: vllm/vllm-openai:latest   # pin a version for reproducible deployments
+    command:
+      - --model=${DATALENS_MODEL_PATH:-Qwen/Qwen2.5-Coder-7B-Instruct}
+      - --served-model-name=datalens
+      - --max-model-len=16384
+      - --enable-prefix-caching
+    ports: ["8001:8000"]
+    volumes:
+      - ${HF_HOME:-~/.cache/huggingface}:/root/.cache/huggingface
+      - ./checkpoints:/checkpoints:ro   # e.g. DATALENS_MODEL_PATH=/checkpoints/grpo-qwen2.5-coder-7b/merged
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
-    ports:
-      - "8000:8000"
+      dockerfile: docker/Dockerfile
+    ports: ["8000:8000"]
     environment:
-      AUTH_REQUIRE_ENABLED: "false"
-      DEBUG_MODE: "true"
-      REDIS_ENABLED: "true"
-      REDIS_URL: redis://redis:6379/0
-      UPLOAD_STORAGE_DIR: /app/data/uploads
-      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:8501
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      - redis
-
-  web-dev:
-    build:
-      context: .
-      dockerfile: Dockerfile.web-dev
-    ports:
-      - "8501:8501"
-    environment:
-      API_URL: http://api:8000
-    depends_on:
-      - api
-
-  web:
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    depends_on:
-      - api
+      DATALENS_BACKEND: ${DATALENS_BACKEND:-openai}
+      DATALENS_MODEL: ${DATALENS_MODEL:-datalens}
+      DATALENS_BASE_URL: ${DATALENS_BASE_URL:-http://vllm:8000/v1}
+      DATALENS_SAMPLES: ${DATALENS_SAMPLES:-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    # Mount your own SQLite files (db_id/db_id.sqlite or db_id.sqlite) here:
+    # volumes:
+    #   - ./data/bird/dev/dev_databases:/app/data/databases:ro

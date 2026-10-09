@@ -1,0 +1,27 @@
+# Zero-shot starting point for the 7B fine-tune.
+run_name: base-qwen2.5-coder-7b
+model:
+  name: Qwen2.5-Coder-7B (base)
+  backend: vllm
+  model: Qwen/Qwen2.5-Coder-7B-Instruct
+  params_b: 7
+  group: base
+  training: none
+  backend_kwargs:
+    max_model_len: 16384      # longest BIRD dev prompt plus max_tokens, with room to spare
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.9
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: true
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 16               # for maj@k / pass@k and self-consistency
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 1.5        # what one A100 40GB costs you per hour; edit to match
+  num_gpus: 1

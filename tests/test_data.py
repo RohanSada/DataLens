@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from datalens.data import download as download_module
-from datalens.data.benchmarks import bird_spec, load_examples, resolve_spec, spider_spec
+from datalens.data.benchmarks import benchmark_label, bird_spec, load_examples, resolve_spec, spider_spec
 from datalens.data.download import extract_recursive, normalise_bird_split
 from datalens.data.schema import DatabaseSchema, introspect_sqlite, load_schema, quote_ident
 from datalens.prompts import PromptConfig, build_prompt, format_answer, prompt_for_example
@@ -43,6 +43,14 @@ def test_resolve_spec_and_missing_file(tmp_path):
         resolve_spec("wikisql", tmp_path)
     with pytest.raises(FileNotFoundError, match="datalens data download"):
         load_examples(bird_spec(tmp_path, "dev"))
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "label"),
+    [("bird-dev", "BIRD dev"), ("bird-train", "BIRD train"), ("spider-dev", "Spider dev")],
+)
+def test_benchmark_label(benchmark, label):
+    assert benchmark_label(benchmark) == label
 
 
 def test_introspection_reads_keys_examples_and_descriptions(shop_db):

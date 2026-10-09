@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.colors import LinearSegmentedColormap
 
+from datalens.data.benchmarks import benchmark_label
 from datalens.eval.score import CATEGORIES
 
 if TYPE_CHECKING:
@@ -150,7 +151,8 @@ def plot_ex(runs: list[Run], theme: Theme) -> Any:
     ax.set_yticks(range(len(rows)), [r.name for r in rows])
     ax.grid(False, axis="y")
     ax.set_xlim(0, 100)
-    ax.set_xlabel("Execution accuracy on BIRD dev (%), greedy, with 95% CI")
+    benchmarks = ", ".join(sorted({benchmark_label(r.config.benchmark) for r in rows}))
+    ax.set_xlabel(f"Execution accuracy on {benchmarks} (%), greedy, with 95% CI")
     _title(ax, theme, "Accuracy by model")
     _legend(ax, theme)
     return fig

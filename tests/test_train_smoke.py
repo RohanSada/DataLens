@@ -8,6 +8,7 @@ is caught here instead of an hour into a GPU job. Model quality is irrelevant.
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -149,3 +150,35 @@ def test_grpo_updates_weights_when_rewards_vary(tmp_path, bird_root, monkeypatch
     out = run(config, model=model, tokenizer=tokenizer)
     state = json.loads((out / "trainer_state.json").read_text())
     assert any(h.get("grad_norm", 0) > 0 for h in state["log_history"])
+
+
+def test_grpo_rerun_resumes_from_the_last_checkpoint(tmp_path, bird_root, monkeypatch, caplog):
+    """Rerunning after a disconnect continues from the newest checkpoint, not step 0."""
+    from datalens.rewards import ExecutionReward
+
+    monkeypatch.chdir(tmp_path)
+    scored: list[int] = []
+    score = ExecutionReward.score
+    monkeypatch.setattr(ExecutionReward, "score", lambda self, *args: scored.append(1) or score(self, *args))
+    trainer = {
+        "per_device_train_batch_size": 4,
+        "num_generations": 2,
+        "max_completion_length": 12,
+        "save_strategy": "steps",
+        "save_steps": 1,
+    }
+    config = _config(tmp_path, bird_root, "grpo", trainer)
+    config.export.merge_lora = False
+    model, tokenizer = tiny_model_and_tokenizer(_corpus(bird_root))
+    out = run(config, model=model, tokenizer=tokenizer)
+    assert (out / "checkpoint-2").is_dir()
+    first_run = len(scored)
+
+    scored.clear()
+    config.trainer["max_steps"] = 3
+    model, tokenizer = tiny_model_and_tokenizer(_corpus(bird_root))
+    with caplog.at_level(logging.INFO, logger="datalens.training.train"):
+        run(config, model=model, tokenizer=tokenizer)
+    assert f"resuming from {out / 'checkpoint-2'}" in caplog.text
+    assert json.loads((out / "trainer_state.json").read_text())["global_step"] == 3
+    assert 2 * len(scored) == first_run, "only the one new step should run"

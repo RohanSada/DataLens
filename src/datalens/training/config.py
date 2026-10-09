@@ -75,6 +75,9 @@ class TrainConfig(_Strict):
     reward: RewardSpec = Field(default_factory=RewardSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
     trainer: dict[str, Any] = Field(default_factory=dict)
+    resume: bool = Field(
+        True, description="Continue from the newest checkpoint in output_dir, e.g. after a disconnect."
+    )
 
     @classmethod
     def from_yaml(cls, path: str | Path, sets: Sequence[str] = ()) -> TrainConfig:

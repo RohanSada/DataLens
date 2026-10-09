@@ -5,10 +5,11 @@ import json
 import pytest
 
 from datalens.data.benchmarks import bird_spec, load_examples
+from datalens.eval import plots
 from datalens.eval.config import EvalConfig, PricingSpec
 from datalens.eval.generate import generate
 from datalens.eval.metrics import query_cost_usd, write_metrics
-from datalens.eval.report import build_report
+from datalens.eval.report import build_report, load_runs
 from datalens.eval.score import score_run
 from datalens.inference.backends import FakeBackend
 from datalens.prompts import PromptParts
@@ -119,6 +120,20 @@ def test_report_compares_small_and_large(tmp_path, bird_root):
     figures = sorted(p.name for p in (tmp_path / "report" / "figures").glob("*.png"))
     assert "ex_by_model.png" in figures and "ex_by_model-dark.png" in figures
     assert "accuracy_vs_cost.png" in figures and "self_consistency.png" in figures
+
+
+def test_report_and_chart_name_the_benchmark(tmp_path, bird_root):
+    examples = load_examples(bird_spec(bird_root, "dev"))
+    config = _config("transfer", "fine-tuned").model_copy(update={"benchmark": "spider-dev"})
+    run_dir = generate(config, tmp_path / "runs", backend=FakeBackend(oracle), examples=examples)
+    score_run(run_dir, examples=examples, workers=2)
+    write_metrics(run_dir, n_boot=50)
+
+    fig = plots.plot_ex(load_runs([run_dir], n_boot=50), plots.LIGHT)
+    assert fig.axes[0].get_xlabel().startswith("Execution accuracy on Spider dev (%)")
+    plots.plt.close(fig)
+    text = build_report([run_dir], tmp_path / "report", n_boot=50, plots=False).read_text()
+    assert "Benchmark: Spider dev (4 questions)." in text
 
 
 def test_query_cost_accounts_for_cache():

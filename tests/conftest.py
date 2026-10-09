@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from pathlib import Path
 
 import pytest
+
+# TRL's trainers compute log-probabilities with a Triton kernel. Without a GPU, Triton
+# can only run it in interpreter mode, which has to be chosen before TRL is imported.
+if shutil.which("nvidia-smi") is None:
+    os.environ.setdefault("TRITON_INTERPRET", "1")
 
 QUESTIONS = [
     {

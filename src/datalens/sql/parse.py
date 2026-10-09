@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import SqlglotError
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 # A fence may carry any language tag on its own line (sql, sqlite, postgresql, ...),
@@ -77,7 +77,7 @@ def is_read_only(sql: str) -> bool:
     """
     try:
         statements = [s for s in sqlglot.parse(sql, read="sqlite") if s is not None]
-    except ParseError:
+    except SqlglotError:  # ParseError, or TokenError for e.g. an unclosed quote
         return False
     if len(statements) != 1:
         return False
@@ -103,7 +103,7 @@ def schema_refs(sql: str) -> SchemaRefs | None:
     """
     try:
         tree = sqlglot.parse_one(sql, read="sqlite")
-    except ParseError:
+    except SqlglotError:
         return None
     if tree is None:
         return None

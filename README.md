@@ -18,23 +18,49 @@ question + schema ──▶ small model ──▶ 8 SQL candidates ──▶ run
 
 ## Results
 
-> **Status: pipeline complete, runs pending.** Training and full evaluation need a GPU; the
-> [Colab notebook](notebooks/colab_train_and_eval.ipynb) runs everything end to end. The tables below
-> are produced by `datalens eval report` and will be filled from those runs, not by hand.
+> **Status: 3B runs done, frontier runs pending.** The numbers below come from
+> [reports/bird-dev/results.md](reports/bird-dev/results.md), written by `datalens eval report` from
+> the [Colab notebook](notebooks/colab_train_and_eval.ipynb) runs. Claude and the larger Qwen models
+> haven't been run yet, so the small-vs-frontier question is still open.
 
 | Model | Params | Training | EX % (95% CI) | Simple | Moderate | Challenging | EX with self-consistency | $ / 1k queries |
 |---|---:|---|---:|---:|---:|---:|---:|---:|
-| Qwen2.5-Coder-3B | 3B | none | | | | | | |
-| Qwen2.5-Coder-3B | 3B | SFT | | | | | | |
-| Qwen2.5-Coder-3B | 3B | **GRPO** | | | | | | |
-| Qwen2.5-Coder-7B | 7B | **GRPO** | | | | | | |
-| Qwen2.5-Coder-32B | 32B | none | | | | | | |
-| Claude Sonnet 5.5 | undisclosed | none | | | | | | |
-| Claude Opus 5.5 | undisclosed | none | | | | | | |
+| Qwen2.5-Coder-3B | 3B | none | 37.2 (34.7–39.6) | 44.4 | 26.9 | 23.4 | 54.4 | $0.025 |
+| Qwen2.5-Coder-3B | 3B | SFT | 50.8 (48.3–53.3) | 58.1 | 40.9 | 35.9 | 56.5 | $0.015 |
+| Qwen2.5-Coder-3B | 3B | **GRPO** | **51.8** (49.2–54.2) | **58.4** | **42.5** | **39.3** | **60.0** | $0.013 |
+| Qwen2.5-Coder-7B | 7B | **GRPO** | not run yet | | | | | |
+| Qwen2.5-Coder-32B | 32B | none | not run yet | | | | | |
+| Claude Sonnet 5.5 | undisclosed | none | not run yet | | | | | |
+| Claude Opus 5.5 | undisclosed | none | not run yet | | | | | |
 
-BIRD dev, 1,534 questions. EX = execution accuracy (the official BIRD metric). The full report adds
-Soft-F1, R-VES, paired McNemar tests with Holm correction, maj@k / pass@k curves, an error taxonomy
-and latency. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) for the hypotheses and protocol.
+BIRD dev, 1,534 questions. EX = execution accuracy (the official BIRD metric), greedy decoding.
+Self-consistency is a majority vote over 16 sampled queries by their execution result. Cost is
+greedy decoding on one Colab G4 GPU (RTX PRO 6000), priced at an assumed $1.50 per GPU hour. The
+full report adds Soft-F1, maj@k / pass@k curves, an error taxonomy and latency; paired McNemar tests
+appear once a frontier model is in the report, and R-VES needs `datalens eval score --ves` (not run
+here). See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) for the hypotheses and protocol.
+
+What the 3B runs show so far:
+
+* **Fine-tuning adds about 15 points.** GRPO lifts the 3B model from 37.2% to 51.8% EX, with
+  non-overlapping confidence intervals. The biggest change is in schema errors (a table or column
+  that doesn't exist), which fall from 27.0% of questions to 8.9%.
+* **GRPO and SFT are close at greedy decoding.** 51.8% vs 50.8% lies inside both confidence
+  intervals, so these runs don't separate them. GRPO is ahead on challenging questions (39.3% vs
+  35.9%), but there are only 145 of those.
+* **The gap grows with sampling.** With 16 votes GRPO reaches 60.0%, against 56.5% for SFT and
+  54.4% for the base model, for $0.20 per 1k queries. The report has no paired test of GRPO
+  against SFT yet.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="reports/bird-dev/figures/self_consistency-dark.png">
+  <img alt="Execution accuracy against number of voting samples for the base, SFT and GRPO 3B models" src="reports/bird-dev/figures/self_consistency.png" width="640">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="reports/bird-dev/figures/grpo_training-dark.png">
+  <img alt="Share of GRPO rollouts that execute and that are correct over 400 training steps" src="reports/bird-dev/figures/grpo_training.png" width="640">
+</picture>
 
 ## What's in here
 

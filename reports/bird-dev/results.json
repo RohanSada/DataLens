@@ -1,0 +1,275 @@
+{
+  "runs": [
+    {
+      "run_name": "base-qwen2.5-coder-3b",
+      "model": "Qwen2.5-Coder-3B (base)",
+      "model_id": "Qwen/Qwen2.5-Coder-3B-Instruct",
+      "group": "base",
+      "training": "none",
+      "params_b": 3.0,
+      "train_fraction": null,
+      "benchmark": "bird-dev",
+      "n": 1534,
+      "gold_failures": 1,
+      "greedy": {
+        "ex": 0.37157757496740546,
+        "ex_ci95": [
+          0.3474576271186441,
+          0.3963494132985658
+        ],
+        "ex_by_difficulty": {
+          "simple": {
+            "n": 925,
+            "ex": 0.44432432432432434
+          },
+          "moderate": {
+            "n": 464,
+            "ex": 0.26939655172413796
+          },
+          "challenging": {
+            "n": 145,
+            "ex": 0.23448275862068965
+          }
+        },
+        "soft_f1": 0.3991356416310242,
+        "r_ves": null,
+        "errors": {
+          "correct": 570,
+          "no_sql": 18,
+          "syntax_error": 20,
+          "schema_error": 414,
+          "timeout": 2,
+          "runtime_error": 50,
+          "empty_result": 82,
+          "wrong_result": 378
+        },
+        "schema_linking": {
+          "table_recall": 0.892470664928292,
+          "table_precision": 0.8661340434975588,
+          "column_recall": 0.8712167070217919,
+          "column_precision": 0.8844293951778982
+        },
+        "truncated": 7,
+        "cost": {
+          "mean_input_tokens": 2446.6857887874835,
+          "mean_output_tokens": 370.01955671447195,
+          "latency_p50_s": 0.0658,
+          "latency_p95_s": 0.0728,
+          "queries_per_s": 16.676051928399513,
+          "usd_per_1k_queries": 0.024985930030421554
+        }
+      },
+      "sampled": {
+        "num_samples": 16,
+        "maj_at_k": {
+          "1": 0.31158327900912647,
+          "2": 0.3962882985658409,
+          "4": 0.46347376140808344,
+          "8": 0.5119581160365059,
+          "16": 0.5436766623207301
+        },
+        "pass_at_k": {
+          "1": 0.3096887222946545,
+          "2": 0.43120925684485006,
+          "4": 0.5367232832356692,
+          "8": 0.6219197794817091,
+          "16": 0.6883963494132985
+        },
+        "ex_self_consistency": 0.5436766623207301,
+        "ex_self_consistency_ci95": [
+          0.5189048239895697,
+          0.5691003911342895
+        ],
+        "cost": {
+          "mean_input_tokens": 2446.6857887874835,
+          "mean_output_tokens": 4858.906779661017,
+          "latency_p50_s": 0.8636,
+          "latency_p95_s": 1.213,
+          "queries_per_s": 1.201937203090561,
+          "usd_per_1k_queries": 0.3466625923511517
+        }
+      }
+    },
+    {
+      "run_name": "grpo-qwen2.5-coder-3b",
+      "model": "Qwen2.5-Coder-3B GRPO",
+      "model_id": "checkpoints/grpo-qwen2.5-coder-3b/merged",
+      "group": "fine-tuned",
+      "training": "grpo",
+      "params_b": 3.0,
+      "train_fraction": null,
+      "benchmark": "bird-dev",
+      "n": 1534,
+      "gold_failures": 1,
+      "greedy": {
+        "ex": 0.5176010430247718,
+        "ex_ci95": [
+          0.4921773142112125,
+          0.5423728813559322
+        ],
+        "ex_by_difficulty": {
+          "simple": {
+            "n": 925,
+            "ex": 0.5837837837837838
+          },
+          "moderate": {
+            "n": 464,
+            "ex": 0.4245689655172414
+          },
+          "challenging": {
+            "n": 145,
+            "ex": 0.3931034482758621
+          }
+        },
+        "soft_f1": 0.548506975934359,
+        "r_ves": null,
+        "errors": {
+          "correct": 794,
+          "no_sql": 1,
+          "syntax_error": 6,
+          "schema_error": 137,
+          "timeout": 1,
+          "runtime_error": 8,
+          "empty_result": 101,
+          "wrong_result": 486
+        },
+        "schema_linking": {
+          "table_recall": 0.9281616688396349,
+          "table_precision": 0.9196900240122243,
+          "column_recall": 0.8852908155874257,
+          "column_precision": 0.916892323213448
+        },
+        "truncated": 4,
+        "cost": {
+          "mean_input_tokens": 2446.6857887874835,
+          "mean_output_tokens": 216.33050847457628,
+          "latency_p50_s": 0.0331,
+          "latency_p95_s": 0.0577,
+          "queries_per_s": 31.152901037753093,
+          "usd_per_1k_queries": 0.013374891351586267
+        }
+      },
+      "sampled": {
+        "num_samples": 16,
+        "maj_at_k": {
+          "1": 0.4921569426336376,
+          "2": 0.5351613428943938,
+          "4": 0.5705060299869622,
+          "8": 0.5891867666232073,
+          "16": 0.5997392438070405
+        },
+        "pass_at_k": {
+          "1": 0.49107724902216426,
+          "2": 0.5845393307257714,
+          "4": 0.6539468028711836,
+          "8": 0.705700521411082,
+          "16": 0.7470664928292047
+        },
+        "ex_self_consistency": 0.5997392438070405,
+        "ex_self_consistency_ci95": [
+          0.5749674054758801,
+          0.6245110821382008
+        ],
+        "cost": {
+          "mean_input_tokens": 2446.6857887874835,
+          "mean_output_tokens": 2780.8031290743156,
+          "latency_p50_s": 0.4911,
+          "latency_p95_s": 0.6831,
+          "queries_per_s": 2.132222242608528,
+          "usd_per_1k_queries": 0.19541427640156453
+        }
+      }
+    },
+    {
+      "run_name": "sft-qwen2.5-coder-3b",
+      "model": "Qwen2.5-Coder-3B SFT",
+      "model_id": "checkpoints/sft-qwen2.5-coder-3b/merged",
+      "group": "fine-tuned",
+      "training": "sft",
+      "params_b": 3.0,
+      "train_fraction": 1.0,
+      "benchmark": "bird-dev",
+      "n": 1534,
+      "gold_failures": 1,
+      "greedy": {
+        "ex": 0.5078226857887875,
+        "ex_ci95": [
+          0.4830508474576271,
+          0.5332464146023468
+        ],
+        "ex_by_difficulty": {
+          "simple": {
+            "n": 925,
+            "ex": 0.5805405405405405
+          },
+          "moderate": {
+            "n": 464,
+            "ex": 0.40948275862068967
+          },
+          "challenging": {
+            "n": 145,
+            "ex": 0.3586206896551724
+          }
+        },
+        "soft_f1": 0.5405576845098643,
+        "r_ves": null,
+        "errors": {
+          "correct": 779,
+          "no_sql": 0,
+          "syntax_error": 4,
+          "schema_error": 156,
+          "timeout": 1,
+          "runtime_error": 7,
+          "empty_result": 96,
+          "wrong_result": 491
+        },
+        "schema_linking": {
+          "table_recall": 0.9269665362885702,
+          "table_precision": 0.9154699738903395,
+          "column_recall": 0.9138074025785891,
+          "column_precision": 0.9138158962149132
+        },
+        "truncated": 3,
+        "cost": {
+          "mean_input_tokens": 2424.6857887874835,
+          "mean_output_tokens": 59.514993481095175,
+          "latency_p50_s": 0.0546,
+          "latency_p95_s": 0.0576,
+          "queries_per_s": 28.472895066059348,
+          "usd_per_1k_queries": 0.014633800521512386
+        }
+      },
+      "sampled": {
+        "num_samples": 16,
+        "maj_at_k": {
+          "1": 0.4444263363754889,
+          "2": 0.4926254889178618,
+          "4": 0.5293147001303781,
+          "8": 0.5532309322033898,
+          "16": 0.5651890482398957
+        },
+        "pass_at_k": {
+          "1": 0.4451189700130378,
+          "2": 0.5471208170360713,
+          "4": 0.6269513732681921,
+          "8": 0.6886033132447735,
+          "16": 0.7385919165580183
+        },
+        "ex_self_consistency": 0.5651890482398957,
+        "ex_self_consistency_ci95": [
+          0.5404172099087353,
+          0.590612777053455
+        ],
+        "cost": {
+          "mean_input_tokens": 2424.6857887874835,
+          "mean_output_tokens": 920.5365058670144,
+          "latency_p50_s": 0.1724,
+          "latency_p95_s": 0.2721,
+          "queries_per_s": 5.702504715532745,
+          "usd_per_1k_queries": 0.0730673076923077
+        }
+      }
+    }
+  ],
+  "pairs": []
+}

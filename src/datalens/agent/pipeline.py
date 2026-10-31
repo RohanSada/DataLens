@@ -24,7 +24,7 @@ import logging
 import time
 import zlib
 from collections.abc import Iterator, Sequence
-from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -107,8 +107,36 @@ class _Resources:
         if not (self.spec.value_hints or self.spec.tools):
             return None
         if example.db_path not in self._values:
+            if len(self._values) >= 4:  # questions arrive grouped by database; keep a few indexes
+                self._values.pop(next(iter(self._values)))
             self._values[example.db_path] = ValueIndex.load(example.db_path, self.value_cache)
         return self._values[example.db_path]
+
+    def prefetch(self, examples: Sequence[Example], workers: int = 8) -> None:
+        """Introspect schemas and build value indexes for every database up front, in parallel.
+
+        Large databases take minutes to index; doing it here keeps the GPU from
+        idling between chunks. Indexes are written to the on-disk cache and loaded
+        again when their chunk runs.
+        """
+        first: dict[Path, Example] = {}
+        for e in examples:
+            first.setdefault(e.db_path, e)
+        if not first:
+            return
+
+        def warm(example: Example) -> None:
+            load_schema(example.db_path, num_examples=self.spec.num_examples, cache_dir=self.schema_cache)
+            if self.value_cache is not None and (self.spec.value_hints or self.spec.tools):
+                ValueIndex.load(example.db_path, self.value_cache)
+
+        log.info("preparing %d databases (schemas and value indexes)", len(first))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for future in [pool.submit(warm, e) for e in first.values()]:
+                try:
+                    future.result()
+                except Exception:
+                    log.exception("could not prepare a database; it will be retried when its turn comes")
 
     def database(self, example: Example) -> Database:
         if example.db_path not in self._dbs:
@@ -323,6 +351,7 @@ def generate_agentic(
         kwargs = {**config.model.backend_kwargs, **spec.chat_kwargs}
         model = create_chat_model(config.model.backend, config.model.model, **kwargs)
     res = _Resources(spec, config.schema_cache_dir, value_cache_dir, config.data_root)
+    res.prefetch(todo)
 
     log.info(
         "agent: %d/%d examples with %s, %d attempts each",
@@ -352,4 +381,4 @@ def generate_agentic(
     return run_dir
 
 
-__all__ = ["TRACES_FILE", "asdict", "generate_agentic", "render_schema", "run_chunk"]
+__all__ = ["TRACES_FILE", "generate_agentic", "render_schema", "run_chunk"]

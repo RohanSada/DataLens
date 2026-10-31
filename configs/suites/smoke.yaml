@@ -1,0 +1,5 @@
+# A 10-minute end-to-end check before the long runs: 12 BIRD train questions, 4 attempts each.
+runs:
+  - config: configs/eval/agent-qwen3-coder-30b-a3b.yaml
+    run_name: smoke-agent-qwen3-coder
+    set: [benchmark=bird-train, sample=12, drop_bad_gold=true, agent.rollouts=4, agent.chunk_size=12]

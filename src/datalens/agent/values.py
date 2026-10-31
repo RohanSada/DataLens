@@ -66,14 +66,21 @@ class ValueMatch:
 class ValueIndex:
     """Distinct text values of one database, searchable by exact, token and fuzzy match."""
 
-    def __init__(self, entries: list[tuple[str, str, str]]) -> None:
-        self.entries = entries
+    def __init__(self, columns: list[tuple[str, str, list[str]]]) -> None:
+        self.columns = [(t, c) for t, c, _ in columns]
+        self.entries: list[tuple[int, str]] = [
+            (ci, value) for ci, (_t, _c, values) in enumerate(columns) for value in values
+        ]
         self.by_norm: dict[str, list[int]] = {}
         self.by_token: dict[str, list[int]] = {}
-        for i, (_t, _c, value) in enumerate(entries):
+        for i, (_ci, value) in enumerate(self.entries):
             self.by_norm.setdefault(normalise(value), []).append(i)
             for tok in set(tokens(value)):
                 self.by_token.setdefault(tok, []).append(i)
+        self._vocab: dict[str, list[str]] | None = None
+
+    def __len__(self) -> int:
+        return len(self.entries)
 
     # ------------------------------------------------------------ building
 
@@ -95,19 +102,19 @@ class ValueIndex:
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
                 )
             ]
-            columns = []
+            text_columns = []
             for table in tables:
                 for _cid, name, col_type, *_rest in conn.execute(f"PRAGMA table_info({quote_ident(table)})"):
                     upper = (col_type or "").upper()
                     if upper == "" or any(a and a in upper for a in _TEXT_AFFINITY):
-                        columns.append((table, name))
+                        text_columns.append((table, name))
         except sqlite3.Error as exc:
             raise ValueError(f"could not read {db_path}: {exc}") from exc
         finally:
             conn.close()
 
-        entries: list[tuple[str, str, str]] = []
-        for table, column in columns:
+        columns: list[tuple[str, str, list[str]]] = []
+        for table, column in text_columns:
             col = quote_ident(column)
             sql = (
                 f"SELECT DISTINCT {col} FROM {quote_ident(table)} WHERE {col} IS NOT NULL "
@@ -115,10 +122,11 @@ class ValueIndex:
                 f"LIMIT {int(max_values_per_column)}"
             )
             result = execute(db_path, sql, timeout_s=timeout_s)
-            if not result.ok or not result.rows:
-                continue
-            entries.extend((table, column, str(v)) for (v,) in result.rows if str(v).strip())
-        return cls(entries)
+            if result.ok and result.rows:
+                values = [str(v) for (v,) in result.rows if str(v).strip()]
+                if values:
+                    columns.append((table, column, values))
+        return cls(columns)
 
     @classmethod
     def load(cls, db_path: str | Path, cache_dir: str | Path | None = None) -> ValueIndex:
@@ -128,21 +136,38 @@ class ValueIndex:
             return cls.build(path)
         cache_file = Path(cache_dir) / f"{path.stem}-{int(path.stat().st_mtime)}.json"
         if cache_file.is_file():
-            return cls([tuple(e) for e in json.loads(cache_file.read_text(encoding="utf-8"))])
+            raw = json.loads(cache_file.read_text(encoding="utf-8"))
+            return cls([(t, c, values) for t, c, values in raw["columns"]])
         log.info("indexing values of %s", path.name)
         index = cls.build(path)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(index.entries, ensure_ascii=False), encoding="utf-8")
+        payload = {"columns": index.column_values()}
+        cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return index
+
+    def column_values(self) -> list[tuple[str, str, list[str]]]:
+        grouped: dict[int, list[str]] = {}
+        for ci, value in self.entries:
+            grouped.setdefault(ci, []).append(value)
+        return [(*self.columns[ci], values) for ci, values in grouped.items()]
 
     # ------------------------------------------------------------ lookups
 
     def _match(self, i: int, score: float) -> ValueMatch:
-        table, column, value = self.entries[i]
+        ci, value = self.entries[i]
+        table, column = self.columns[ci]
         return ValueMatch(table, column, value, score)
 
     def exact(self, text: str) -> list[ValueMatch]:
         return [self._match(i, 1.0) for i in self.by_norm.get(normalise(text), [])]
+
+    def _close_tokens(self, token: str, n: int = 3) -> list[str]:
+        """Vocabulary tokens spelled like ``token`` (same first character, for speed)."""
+        if self._vocab is None:
+            self._vocab = {}
+            for tok in self.by_token:
+                self._vocab.setdefault(tok[0], []).append(tok)
+        return difflib.get_close_matches(token, self._vocab.get(token[0], []), n=n, cutoff=0.8)
 
     def search(
         self,
@@ -151,56 +176,62 @@ class ValueIndex:
         limit: int = 12,
         table: str | None = None,
         column: str | None = None,
-        max_token_postings: int = 5_000,
-        fuzzy: bool = True,
+        max_candidates: int = 3_000,
     ) -> list[ValueMatch]:
         """Values that equal, contain, or closely resemble ``text``, best first.
 
-        Exact (case-insensitive) matches score 1.0. Values sharing all of the
-        query's tokens score by string similarity. If nothing shares the tokens,
-        a fuzzy pass over the shortlisted columns catches spelling differences.
+        Exact (case-insensitive) matches score 1.0, values containing every query
+        token 0.5-1.0, values containing some of them or a similarly spelled token
+        below that. Every step is an index lookup, so a search costs milliseconds
+        even on databases with millions of values.
         """
         query = normalise(text)
         if not query:
             return []
 
         def wanted(i: int) -> bool:
-            t, c, _ = self.entries[i]
+            t, c = self.columns[self.entries[i][0]]
             return (table is None or t.lower() == table.lower()) and (
                 column is None or c.lower() == column.lower()
             )
 
-        scored: dict[int, float] = {i: 1.0 for i in self.by_norm.get(query, []) if wanted(i)}
+        def similarity(i: int) -> float:
+            return difflib.SequenceMatcher(None, query, normalise(self.entries[i][1])).ratio()
 
-        query_tokens = [t for t in tokens(query) if t]
-        postings = [self.by_token.get(t, []) for t in query_tokens]
-        if query_tokens and all(postings):
-            # Intersect, starting from the rarest token; skip tokens too common to narrow anything.
-            ordered = sorted(postings, key=len)
-            candidates = set(ordered[0]) if len(ordered[0]) <= max_token_postings else set()
+        scored: dict[int, float] = {i: 1.0 for i in self.by_norm.get(query, []) if wanted(i)}
+        query_tokens = list(dict.fromkeys(tokens(query)))
+        postings = {t: self.by_token.get(t, []) for t in query_tokens}
+
+        # Values that contain every query token.
+        if query_tokens and all(postings.values()):
+            ordered = sorted(postings.values(), key=len)
+            candidates = set(ordered[0])
             for plist in ordered[1:]:
+                candidates &= set(plist)
                 if not candidates:
                     break
-                if len(plist) <= max_token_postings * 4:
-                    candidates &= set(plist)
-            for i in candidates:
-                if i in scored or not wanted(i):
-                    continue
-                value = normalise(self.entries[i][2])
-                scored[i] = 0.5 + 0.49 * difflib.SequenceMatcher(None, query, value).ratio()
+            for i in sorted(candidates)[:max_candidates]:
+                if i not in scored and wanted(i):
+                    scored[i] = 0.5 + 0.49 * similarity(i)
 
-        if fuzzy and len(scored) < limit and len(query) >= 3:
-            pool = [i for i in range(len(self.entries)) if wanted(i)] if (table or column) else None
-            if pool is None and len(self.entries) <= 200_000:
-                pool = list(range(len(self.entries)))
-            if pool:
-                norms = {normalise(self.entries[i][2]): i for i in pool}
-                for close in difflib.get_close_matches(query, list(norms), n=limit, cutoff=0.75):
-                    i = norms[close]
-                    if i not in scored:
-                        scored[i] = 0.4 * difflib.SequenceMatcher(None, query, close).ratio()
+        if len(scored) < limit:
+            # Values that contain some query tokens, or tokens spelled like them.
+            partial: set[int] = set()
+            for tok in query_tokens:
+                options = [tok] if postings[tok] else []
+                if len(tok) >= 4:
+                    options += [t for t in self._close_tokens(tok) if t != tok]
+                for option in options:
+                    plist = self.by_token.get(option, [])
+                    if len(plist) <= max_candidates:
+                        partial.update(plist)
+            for i in sorted(partial)[:max_candidates]:
+                if i not in scored and wanted(i):
+                    ratio = similarity(i)
+                    if ratio >= 0.5:
+                        scored[i] = 0.1 + 0.39 * ratio
 
-        best = sorted(scored.items(), key=lambda kv: (-kv[1], len(self.entries[kv[0]][2]), kv[0]))
+        best = sorted(scored.items(), key=lambda kv: (-kv[1], len(self.entries[kv[0]][1]), kv[0]))
         return [self._match(i, s) for i, s in best[:limit]]
 
     def hints(self, question: str, evidence: str = "", *, limit: int = 12, max_columns: int = 4) -> list[str]:

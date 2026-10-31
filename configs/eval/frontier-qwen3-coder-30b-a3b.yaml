@@ -1,0 +1,29 @@
+# Open-weight mixture-of-experts coder (30B total, 3B active), zero-shot, same prompt as every model.
+# This is the "before" for the agent run on the same model (agent-qwen3-coder-30b-a3b.yaml): both use
+# identical engine settings, so a suite loads the model once for the two.
+run_name: frontier-qwen3-coder-30b-a3b
+model:
+  name: Qwen3-Coder-30B-A3B (zero-shot)
+  backend: vllm
+  model: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  params_b: 30.5
+  group: frontier
+  training: none
+  backend_kwargs:
+    max_model_len: 32768
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.92
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: true
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 8                 # self-consistency baseline: majority vote over 8 sampled queries
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 1.5        # one Colab G4 (RTX PRO 6000, 96 GB), as in the 3B runs
+  num_gpus: 1

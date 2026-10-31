@@ -104,6 +104,14 @@ class VLLMBackend:
         self.name = model
         self.llm = LLM(model=model, **engine_kwargs)
 
+    @classmethod
+    def from_llm(cls, llm: Any, name: str) -> VLLMBackend:
+        """Wrap an engine that is already loaded (to share it with the agent)."""
+        self = cls.__new__(cls)
+        self.name = name
+        self.llm = llm
+        return self
+
     def generate(self, prompts: Sequence[PromptParts], sampling: SamplingConfig) -> list[Generation]:
         from vllm import SamplingParams
 

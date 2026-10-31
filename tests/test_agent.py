@@ -341,3 +341,76 @@ def test_fake_chat_honours_stop_sequences():
     [result] = chat.chat([[{"role": "user", "content": "x"}]], [ChatSampling(stop=STOP_SEQUENCES)])
     assert isinstance(result, ChatResult)
     assert result.text == "<sql>SELECT 1" and result.stop_sequence == "</sql>"
+
+
+# ---------------------------------------------------------------- suites and review
+
+
+def _vllm_config(name: str, model: str = "m", agent: dict | None = None, **kwargs) -> EvalConfig:
+    raw = {
+        "run_name": name,
+        "model": {
+            "name": name,
+            "backend": "vllm",
+            "model": model,
+            "group": "agentic" if agent else "frontier",
+            "backend_kwargs": {"max_model_len": 32768, **kwargs},
+        },
+    }
+    if agent is not None:
+        raw["agent"] = agent
+    return EvalConfig.model_validate(raw)
+
+
+def test_suite_groups_consecutive_runs_that_share_an_engine():
+    from datalens.eval.suite import groups_of
+
+    configs = [
+        _vllm_config("base"),
+        _vllm_config("agent", agent={"chat_kwargs": {"chat_template_kwargs": {"enable_thinking": False}}}),
+        _vllm_config("other-model", model="m2"),
+        _vllm_config("other-settings", model="m2", quantization="fp8"),
+    ]
+    assert groups_of(configs) == [[0, 1], [2], [3]]
+
+
+def test_suite_scores_reviews_and_reports_finished_runs(bird_root, tmp_path, monkeypatch):
+    from datalens.eval.generate import generate
+    from datalens.eval.suite import run_suite
+    from datalens.inference.backends import FakeBackend
+
+    monkeypatch.chdir(tmp_path)
+    runs = tmp_path / "runs"
+    examples = load_examples(bird_spec(bird_root, "dev"))
+
+    agent_cfg = _agent_config()
+    agent_cfg.data_root = str(bird_root)
+    generate_agentic(agent_cfg, runs, model=FakeChat(agent_policy), examples=examples, value_cache_dir=None)
+
+    base_cfg = EvalConfig.model_validate(
+        {
+            "run_name": "base-test",
+            "model": {"name": "Fake base", "backend": "openai", "model": "fake", "group": "frontier"},
+            "data_root": str(bird_root),
+            "pricing": {"gpu_hourly_usd": 1.0},
+            "schema_cache_dir": None,
+        }
+    )
+    generate(base_cfg, runs, backend=FakeBackend(lambda p, i: "```sql\nSELECT name FROM customers\n```"))
+
+    for cfg in (agent_cfg, base_cfg):
+        (tmp_path / f"{cfg.run_name}.yaml").write_text(cfg.to_yaml())
+    (tmp_path / "suite.yaml").write_text(
+        "runs:\n  - config: agent-test.yaml\n  - config: base-test.yaml\nreports:\n  reports/out: []\n"
+    )
+    run_dirs = run_suite(tmp_path / "suite.yaml", runs, isolate=False)
+    assert [d.name for d in run_dirs] == ["agent-test", "base-test"]
+    assert (tmp_path / "reports/out/results.md").is_file()
+
+    review = [json.loads(line) for line in (runs / "base-test/review.jsonl").read_text().splitlines()]
+    wrong = [r for r in review if not r["correct"]]
+    assert wrong and all("gold_result" in r and "pred_result" in r for r in wrong)
+    agent_review = [json.loads(line) for line in (runs / "agent-test/review.jsonl").read_text().splitlines()]
+    germany = next(r for r in agent_review if r["id"].endswith("-1"))
+    assert germany["agent"]["method"] == "selector"
+    assert [g["correct"] for g in germany["agent"]["groups"]] == [True, False]

@@ -1,0 +1,36 @@
+# The DataLens agent on Qwen3-Coder-30B-A3B: 8 attempts that can query the database and look up
+# values before answering, then result voting and, when attempts disagree, a model-judged choice.
+# Engine settings match frontier-qwen3-coder-30b-a3b.yaml (the zero-shot "before").
+run_name: agent-qwen3-coder-30b-a3b
+model:
+  name: Qwen3-Coder-30B-A3B + DataLens agent
+  backend: vllm
+  model: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  params_b: 30.5
+  group: agentic
+  training: none
+  backend_kwargs:
+    max_model_len: 32768
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.92
+benchmark: bird-dev
+data_root: data/bird
+pricing:
+  gpu_hourly_usd: 1.5
+  num_gpus: 1
+agent:
+  rollouts: 8
+  greedy_first: true
+  temperature: 0.8
+  top_p: 0.95
+  max_turns: 8
+  max_tokens_per_turn: 2048
+  descriptions: true
+  value_hints: true
+  max_schema_chars: 45000      # about 13k tokens; larger schemas drop descriptions to fit
+  max_context_chars: 80000     # about 24k tokens, inside the 32k window with room to answer
+  selection: selector
+  consensus: 0.75
+  selector_candidates: 4
+  selector_samples: 3
+  chunk_size: 64

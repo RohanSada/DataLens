@@ -182,6 +182,44 @@ def eval_run(
     eval_score(run_dir, workers=workers, timeout=30.0, ves=ves)
 
 
+@eval_app.command("suite")
+def eval_suite(
+    suite: Annotated[Path, typer.Argument(help="Suite YAML listing runs (config + overrides).")],
+    runs: Annotated[Path, typer.Option(help="Root folder for run outputs.")] = Path("runs"),
+    isolate: Annotated[
+        bool, typer.Option(help="Load each model in its own subprocess (frees GPU memory between models).")
+    ] = True,
+) -> None:
+    """Generate every run (one model load per engine), then score, review and report them."""
+    from datalens.eval.suite import run_suite
+
+    for run_dir in run_suite(suite, runs, isolate=isolate):
+        typer.echo(f"scored: {run_dir}")
+
+
+@eval_app.command("suite-generate", hidden=True)
+def eval_suite_generate(
+    suite: Annotated[Path, typer.Argument()],
+    runs: Annotated[Path, typer.Option()] = Path("runs"),
+    index: Annotated[list[int] | None, typer.Option(help="Which runs of the suite (0-based).")] = None,
+) -> None:
+    """Generate some runs of a suite in this process (used by `eval suite`)."""
+    from datalens.eval.suite import generate_group, load_suite
+
+    _, configs = load_suite(suite)
+    generate_group([configs[i] for i in (index or range(len(configs)))], runs)
+
+
+@eval_app.command("review")
+def eval_review(
+    run_dir: Annotated[Path, typer.Argument(help="A scored run folder.")],
+) -> None:
+    """Write review.jsonl: every question with gold and chosen SQL, and result previews for misses."""
+    from datalens.eval.review import write_review
+
+    typer.echo(f"wrote {write_review(run_dir)}")
+
+
 @eval_app.command("report")
 def eval_report(
     run_dirs: Annotated[list[Path], typer.Argument(help="Run folders to compare.")],

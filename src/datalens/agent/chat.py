@@ -92,7 +92,13 @@ class FakeChat:
 
 
 class VLLMChat:
-    """Offline batched chat with ``vllm.LLM`` (prefix caching on)."""
+    """Offline batched chat with ``vllm.LLM`` (prefix caching on).
+
+    A prompt that no longer fits the context window would make vLLM reject the
+    whole batch, so such conversations are answered with an empty reply and
+    ``finish_reason="prompt_too_long"`` instead, and every other reply's token
+    limit is capped to what still fits.
+    """
 
     def __init__(
         self, model: str, *, chat_template_kwargs: dict[str, Any] | None = None, **engine_kwargs: Any
@@ -100,50 +106,86 @@ class VLLMChat:
         from vllm import LLM  # lazy: only installed with the [vllm] extra
 
         engine_kwargs.setdefault("enable_prefix_caching", True)
-        self.name = model
+        self._setup(LLM(model=model, **engine_kwargs), model, chat_template_kwargs)
+
+    @classmethod
+    def from_llm(cls, llm: Any, name: str, *, chat_template_kwargs: dict[str, Any] | None = None) -> VLLMChat:
+        """Wrap an engine that is already loaded (to share it with the plain harness)."""
+        self = cls.__new__(cls)
+        self._setup(llm, name, chat_template_kwargs)
+        return self
+
+    def _setup(self, llm: Any, name: str, chat_template_kwargs: dict[str, Any] | None) -> None:
+        self.llm = llm
+        self.name = name
         self.chat_template_kwargs = chat_template_kwargs
-        self.llm = LLM(model=model, **engine_kwargs)
+        self.tokenizer = llm.get_tokenizer()
+        try:
+            self.max_model_len: int | None = int(llm.llm_engine.model_config.max_model_len)
+        except AttributeError:
+            self.max_model_len = None
+
+    def _prompt_tokens(self, conversation: Conversation) -> int:
+        text = sum(len(m["content"]) for m in conversation)
+        if self.max_model_len is None or text < 1.5 * self.max_model_len:
+            return text // 3  # comfortably inside the window even at 2.5 characters per token
+        # Render to text, then encode: apply_chat_template(tokenize=True) returns a dict in
+        # recent transformers releases.
+        prompt = self.tokenizer.apply_chat_template(
+            plain(conversation),
+            tokenize=False,
+            add_generation_prompt=True,
+            **(self.chat_template_kwargs or {}),
+        )
+        return len(self.tokenizer.encode(prompt, add_special_tokens=False))
 
     def chat(
         self, conversations: Sequence[Conversation], sampling: Sequence[ChatSampling]
     ) -> list[ChatResult]:
         from vllm import SamplingParams
 
-        if not conversations:
-            return []
-        params = [
-            SamplingParams(
-                n=1,
-                temperature=s.temperature or 0.0,
-                top_p=s.top_p or 1.0,
-                max_tokens=s.max_tokens,
-                seed=s.seed,
-                stop=list(s.stop) or None,
+        results: list[ChatResult | None] = [None] * len(conversations)
+        batch, params = [], []
+        for i, (conv, s) in enumerate(zip(conversations, sampling, strict=True)):
+            max_tokens = s.max_tokens
+            if self.max_model_len is not None:
+                room = self.max_model_len - self._prompt_tokens(conv) - 8
+                if room < 64:
+                    results[i] = ChatResult(text="", finish_reason="prompt_too_long")
+                    continue
+                max_tokens = min(max_tokens, room)
+            batch.append(i)
+            params.append(
+                SamplingParams(
+                    n=1,
+                    temperature=s.temperature or 0.0,
+                    top_p=s.top_p or 1.0,
+                    max_tokens=max_tokens,
+                    seed=s.seed,
+                    stop=list(s.stop) or None,
+                )
             )
-            for s in sampling
-        ]
+        if not batch:
+            return [r for r in results if r is not None]
         start = time.perf_counter()
         kwargs: dict[str, Any] = {"use_tqdm": False}
         if self.chat_template_kwargs:
             kwargs["chat_template_kwargs"] = self.chat_template_kwargs
-        outputs = self.llm.chat([plain(c) for c in conversations], params, **kwargs)
-        per = (time.perf_counter() - start) / len(conversations)
-        results = []
-        for out in outputs:
+        outputs = self.llm.chat([plain(conversations[i]) for i in batch], params, **kwargs)
+        per = (time.perf_counter() - start) / len(batch)
+        for i, out in zip(batch, outputs, strict=True):
             o = out.outputs[0]
             stop = o.stop_reason if isinstance(o.stop_reason, str) else None
-            results.append(
-                ChatResult(
-                    text=o.text,
-                    finish_reason=o.finish_reason,
-                    stop_sequence=stop,
-                    input_tokens=len(out.prompt_token_ids or []),
-                    cached_input_tokens=int(getattr(out, "num_cached_tokens", 0) or 0),
-                    output_tokens=len(o.token_ids),
-                    latency_s=per,
-                )
+            results[i] = ChatResult(
+                text=o.text,
+                finish_reason=o.finish_reason,
+                stop_sequence=stop,
+                input_tokens=len(out.prompt_token_ids or []),
+                cached_input_tokens=int(getattr(out, "num_cached_tokens", 0) or 0),
+                output_tokens=len(o.token_ids),
+                latency_s=per,
             )
-        return results
+        return [r for r in results if r is not None]
 
 
 class OpenAIChat:

@@ -50,6 +50,7 @@ class Database:
         self.timeout_s = timeout_s
         self.preview_rows = preview_rows
         self._cache: dict[tuple[str, int], ExecResult] = {}
+        self._searches: dict[tuple[str, int], str] = {}
         self._lock = threading.Lock()
 
     def run(self, sql: str, *, max_rows: int = 200, timeout_s: float | None = None) -> ExecResult:
@@ -82,7 +83,14 @@ class Database:
     def search(self, text: str) -> str:
         if self.values is None:
             return "Value search is not available for this database."
-        return format_matches(self.values.search(text), text)
+        key = ("<search>" + text, -1)
+        with self._lock:
+            cached = self._searches.get(key)
+        if cached is None:
+            cached = format_matches(self.values.search(text), text)
+            with self._lock:
+                self._searches[key] = cached
+        return cached
 
 
 def fingerprint(result: ExecResult | None) -> str | None:
@@ -184,6 +192,8 @@ class Attempt:
         """Apply one model turn: execute its action and append the observation."""
         self.turns += 1
         self.usage.add(reply)
+        if reply.finish_reason == "prompt_too_long":
+            return self._finish("context_full")
         self.messages.append({"role": "assistant", "content": close_turn(reply.text, reply.stop_sequence)})
         action = parse_action(reply.text, reply.stop_sequence)
         self.actions.append(action.kind)

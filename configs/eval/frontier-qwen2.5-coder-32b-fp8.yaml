@@ -1,0 +1,31 @@
+# Qwen2.5-Coder-32B with FP8 weights, zero-shot. FP8 halves the weights' memory, which leaves room on a
+# 96 GB GPU for the many parallel agent conversations; this config is the "before" for
+# agent-qwen2.5-coder-32b.yaml and uses identical engine settings. The bf16 config is
+# frontier-qwen2.5-coder-32b.yaml.
+run_name: frontier-qwen2.5-coder-32b-fp8
+model:
+  name: Qwen2.5-Coder-32B FP8 (zero-shot)
+  backend: vllm
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
+  params_b: 32
+  group: frontier
+  training: none
+  backend_kwargs:
+    quantization: fp8
+    max_model_len: 32768
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.92
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 256
+prompt:
+  reasoning: true
+  num_examples: 3
+decoding:
+  greedy: true
+  samples: 8
+  temperature: 0.8
+  max_tokens: 2048
+pricing:
+  gpu_hourly_usd: 1.5
+  num_gpus: 1

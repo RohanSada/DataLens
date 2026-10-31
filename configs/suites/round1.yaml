@@ -1,0 +1,32 @@
+# Round 1: compare the zero-shot baseline with the agent on a fixed tuning set of 300 BIRD *train*
+# questions (databases that never appear in BIRD dev), for two open models. All tuning decisions are
+# made on these runs. The two dev runs are the untuned zero-shot baselines ("before" numbers); the
+# agent only runs on BIRD dev once, after tuning is finished.
+#
+# Runs on the same model are listed together so the model loads once for them.
+runs:
+  # Qwen3-Coder-30B-A3B
+  - config: configs/eval/frontier-qwen3-coder-30b-a3b.yaml
+    run_name: tune-base-qwen3-coder
+    set: [benchmark=bird-train, sample=300, drop_bad_gold=true]
+  - config: configs/eval/agent-qwen3-coder-30b-a3b.yaml
+    run_name: tune-direct-qwen3-coder          # ablation: same prompt and voting, but no database access
+    set: [benchmark=bird-train, sample=300, drop_bad_gold=true, agent.tools=false]
+  - config: configs/eval/agent-qwen3-coder-30b-a3b.yaml
+    run_name: tune-agent-qwen3-coder
+    set: [benchmark=bird-train, sample=300, drop_bad_gold=true]
+  - config: configs/eval/frontier-qwen3-coder-30b-a3b.yaml
+    run_name: dev-base-qwen3-coder
+  # Qwen2.5-Coder-32B (FP8)
+  - config: configs/eval/frontier-qwen2.5-coder-32b-fp8.yaml
+    run_name: tune-base-qwen2.5-coder-32b
+    set: [benchmark=bird-train, sample=300, drop_bad_gold=true]
+  - config: configs/eval/agent-qwen2.5-coder-32b.yaml
+    run_name: tune-agent-qwen2.5-coder-32b
+    set: [benchmark=bird-train, sample=300, drop_bad_gold=true]
+  - config: configs/eval/frontier-qwen2.5-coder-32b-fp8.yaml
+    run_name: dev-base-qwen2.5-coder-32b
+reports:
+  reports/round1-tune: [tune-base-qwen3-coder, tune-direct-qwen3-coder, tune-agent-qwen3-coder,
+                        tune-base-qwen2.5-coder-32b, tune-agent-qwen2.5-coder-32b]
+  reports/round1-dev-baselines: [dev-base-qwen3-coder, dev-base-qwen2.5-coder-32b]

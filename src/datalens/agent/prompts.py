@@ -75,8 +75,8 @@ def schema_block(schema_text: str) -> str:
     return f"Database engine: SQLite\n\nDatabase schema:\n{schema_text}\n\n"
 
 
-def question_block(question: str, evidence: str, hints: Sequence[str]) -> str:
-    parts = []
+def question_block(question: str, evidence: str, hints: Sequence[str], examples: str = "") -> str:
+    parts = [examples] if examples else []
     if hints:
         parts.append(
             "Values from the question found in the database (exact matches, may be incomplete):\n"

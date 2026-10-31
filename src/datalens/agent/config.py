@@ -36,6 +36,9 @@ class AgentSpec(BaseModel):
     max_schema_chars: int = Field(
         60_000, description="Longer schemas drop descriptions, then examples, to fit the context."
     )
+    fewshot: int = Field(0, ge=0, description="Similar solved train questions shown as examples.")
+    fewshot_benchmark: str = Field("bird-train", description="Where examples come from (never the same db).")
+    fewshot_data_root: str | None = Field(None, description="Defaults to the run's data_root.")
     preview_rows: int = 10
     exec_timeout_s: float = 10.0
 

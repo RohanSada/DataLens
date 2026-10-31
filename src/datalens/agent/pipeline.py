@@ -30,6 +30,7 @@ from typing import Any
 
 from datalens.agent.chat import ChatModel, ChatSampling, Conversation, create_chat_model
 from datalens.agent.config import AgentSpec
+from datalens.agent.fewshot import FewShotIndex, format_shots
 from datalens.agent.prompts import AGENT_SYSTEM, DIRECT_SYSTEM, question_block, schema_block
 from datalens.agent.protocol import STOP_SEQUENCES
 from datalens.agent.rollout import Attempt, Database, Usage, attempt_summary, run_attempts
@@ -40,7 +41,7 @@ from datalens.agent.select import (
     selector_requests,
 )
 from datalens.agent.values import ValueIndex
-from datalens.data.benchmarks import Example
+from datalens.data.benchmarks import Example, load_examples, resolve_spec
 from datalens.data.schema import load_schema
 from datalens.eval.config import EvalConfig
 from datalens.eval.generate import CONFIG_FILE, GENERATIONS_FILE, _done_ids, load_benchmark, run_dir_for
@@ -70,13 +71,32 @@ def render_schema(example: Example, spec: AgentSpec, cache_dir: str | None) -> s
 class _Resources:
     """Schemas, value indexes and database handles, reused across a run's chunks."""
 
-    def __init__(self, spec: AgentSpec, schema_cache: str | None, value_cache: str | None) -> None:
+    def __init__(
+        self,
+        spec: AgentSpec,
+        schema_cache: str | None,
+        value_cache: str | None,
+        data_root: str = "data/bird",
+    ) -> None:
         self.spec = spec
         self.schema_cache = schema_cache
         self.value_cache = value_cache
+        self.data_root = data_root
         self._schemas: dict[Path, str] = {}
         self._values: dict[Path, ValueIndex] = {}
         self._dbs: dict[Path, Database] = {}
+        self._shots: FewShotIndex | None = None
+
+    def examples(self, example: Example) -> str:
+        if self.spec.fewshot <= 0:
+            return ""
+        if self._shots is None:
+            root = self.spec.fewshot_data_root or self.data_root
+            self._shots = FewShotIndex(load_examples(resolve_spec(self.spec.fewshot_benchmark, root)))
+        shots = self._shots.query(
+            example.question, example.evidence, k=self.spec.fewshot, exclude_db=example.db_id
+        )
+        return format_shots(shots)
 
     def schema(self, example: Example) -> str:
         if example.db_path not in self._schemas:
@@ -116,7 +136,7 @@ def build_attempts(
     hints = (
         values.hints(example.question, example.evidence) if (values is not None and spec.value_hints) else []
     )
-    question = question_block(example.question, example.evidence, hints)
+    question = question_block(example.question, example.evidence, hints, res.examples(example))
     system = AGENT_SYSTEM if spec.tools else DIRECT_SYSTEM
     db = res.database(example)
     attempts = []
@@ -302,7 +322,7 @@ def generate_agentic(
     if model is None:
         kwargs = {**config.model.backend_kwargs, **spec.chat_kwargs}
         model = create_chat_model(config.model.backend, config.model.model, **kwargs)
-    res = _Resources(spec, config.schema_cache_dir, value_cache_dir)
+    res = _Resources(spec, config.schema_cache_dir, value_cache_dir, config.data_root)
 
     log.info(
         "agent: %d/%d examples with %s, %d attempts each",

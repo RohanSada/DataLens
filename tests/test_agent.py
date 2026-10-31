@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -15,7 +16,7 @@ from datalens.agent.protocol import STOP_SEQUENCES, close_turn, parse_action
 from datalens.agent.rollout import Attempt, Database, run_attempts
 from datalens.agent.select import finish_selection, group_attempts, parse_choice, preliminary
 from datalens.agent.values import ValueIndex
-from datalens.data.benchmarks import bird_spec, load_examples
+from datalens.data.benchmarks import Example, bird_spec, load_examples
 from datalens.eval.config import EvalConfig
 from datalens.eval.generate import load_benchmark
 from datalens.eval.metrics import write_metrics
@@ -414,3 +415,52 @@ def test_suite_scores_reviews_and_reports_finished_runs(bird_root, tmp_path, mon
     germany = next(r for r in agent_review if r["id"].endswith("-1"))
     assert germany["agent"]["method"] == "selector"
     assert [g["correct"] for g in germany["agent"]["groups"]] == [True, False]
+
+
+# ---------------------------------------------------------------- worked examples
+
+
+def _ex(i: int, db: str, question: str, sql: str, evidence: str = "") -> Example:
+    return Example(
+        id=f"t-{i}", db_id=db, question=question, evidence=evidence, gold_sql=sql, db_path=Path("x")
+    )
+
+
+def test_fewshot_retrieves_similar_questions_from_other_databases():
+    from datalens.agent.fewshot import FewShotIndex, format_shots
+
+    pool = [
+        _ex(0, "shop", "What percentage of orders were shipped late?", "SELECT 1"),
+        _ex(
+            1,
+            "cars",
+            "What percentage of cars are red?",
+            "SELECT CAST(SUM(color = 'red') AS REAL) * 100 / COUNT(*)",
+        ),
+        _ex(2, "zoo", "Which animal is the oldest?", "SELECT name FROM animals ORDER BY age DESC LIMIT 1"),
+        _ex(
+            3,
+            "zoo2",
+            "What percentage of animals are red pandas?",
+            "SELECT CAST(SUM(x) AS REAL) * 100 / COUNT(*)",
+        ),
+    ]
+    index = FewShotIndex(pool)
+    shots = index.query("What percentage of customers are from Germany?", "", k=2, exclude_db="shop")
+    assert [s.db_id for s in shots] == ["cars", "zoo2"]
+    text = format_shots(shots)
+    assert "Solved examples" in text and "CAST(SUM(color = 'red') AS REAL)" in text
+    assert index.query("anything", "", k=0) == []
+
+
+def test_agent_prompt_includes_examples_when_enabled(bird_root):
+    from datalens.agent.pipeline import _Resources, build_attempts
+
+    examples = load_examples(bird_spec(bird_root, "dev"))
+    spec = AgentSpec(fewshot=2, fewshot_benchmark="bird-dev")
+    res = _Resources(spec, None, None, str(bird_root))
+    attempts, _, _ = build_attempts(examples[0], spec, res)
+    prompt = attempts[0].messages[1]["content"]
+    # The pool is the same database here, so nothing qualifies: examples are never from the question's db.
+    assert "Solved examples" not in prompt
+    assert "Question: How many customers are there?" in prompt

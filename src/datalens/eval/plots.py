@@ -64,11 +64,12 @@ DARK = Theme(
 )
 
 # Fixed group -> slot mapping: colour follows the entity, never its rank.
-GROUP_SLOT = {"fine-tuned": 0, "frontier": 1, "base": 2}
+GROUP_SLOT = {"fine-tuned": 0, "frontier": 1, "base": 2, "agentic": 3}
 GROUP_LABEL = {
     "fine-tuned": "Fine-tuned (small)",
     "frontier": "Frontier (large, zero-shot)",
     "base": "Base (small, zero-shot)",
+    "agentic": "Agentic (tools + selection)",
 }
 
 

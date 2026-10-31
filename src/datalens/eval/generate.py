@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -31,8 +32,28 @@ def run_dir_for(config: EvalConfig, runs_root: str | Path) -> Path:
 
 
 def load_benchmark(config: EvalConfig) -> list[Example]:
+    """The questions a run answers: the split, optionally limited, cleaned and sampled.
+
+    ``sample`` draws a fixed-seed random subset, so a tuning set is the same on
+    every machine. With ``drop_bad_gold``, questions whose gold query fails or
+    returns nothing are skipped first (they would grade every answer wrong, or
+    any empty answer right); official evaluation runs leave this off.
+    """
     spec = resolve_spec(config.benchmark, config.data_root)
-    return load_examples(spec, limit=config.limit)
+    examples = load_examples(spec, limit=config.limit)
+    if config.sample is None and not config.drop_bad_gold:
+        return examples
+    ordered = sorted(examples, key=lambda e: e.id)
+    random.Random(config.sample_seed).shuffle(ordered)
+    if config.sample is not None and not config.drop_bad_gold:
+        return ordered[: config.sample]
+    pool = ordered if config.sample is None else ordered[: int(config.sample * 1.5) + 20]
+    from datalens.training.data import gold_status
+
+    cache = Path(".cache/gold") / f"{config.benchmark}.json"
+    status = gold_status(pool, timeout_s=60.0, cache_file=cache)
+    kept = [e for e in pool if status[e.id]["ok"] and status[e.id]["rows"] > 0]
+    return kept if config.sample is None else kept[: config.sample]
 
 
 def _done_ids(path: Path) -> set[str]:
@@ -71,8 +92,13 @@ def generate(
     """Generate greedy and/or sampled completions for every example.
 
     Returns the run directory. ``backend`` and ``examples`` can be injected (tests
-    use a fake backend); otherwise they come from the config.
+    use a fake backend); otherwise they come from the config. Configs with an
+    ``agent`` section run the agent instead (see :mod:`datalens.agent.pipeline`).
     """
+    if config.agent is not None:
+        from datalens.agent.pipeline import generate_agentic
+
+        return generate_agentic(config, runs_root, examples=examples)
     run_dir = run_dir_for(config, runs_root)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / CONFIG_FILE).write_text(config.to_yaml(), encoding="utf-8")

@@ -9,6 +9,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from datalens.agent.config import AgentSpec
 from datalens.config_utils import apply_overrides, load_yaml
 from datalens.prompts import PromptConfig
 
@@ -24,7 +25,7 @@ class ModelSpec(_Strict):
     backend: Literal["vllm", "openai", "anthropic"]
     model: str = Field(description="Hugging Face id, local path, or API model id.")
     params_b: float | None = Field(None, description="Parameter count in billions.")
-    group: Literal["base", "fine-tuned", "frontier"] = Field(
+    group: Literal["base", "fine-tuned", "frontier", "agentic"] = Field(
         description="'fine-tuned' runs are compared against 'frontier' runs in reports."
     )
     training: str = Field("none", description="e.g. none, sft, grpo, sft+grpo.")
@@ -69,11 +70,21 @@ class EvalConfig(_Strict):
     benchmark: str = "bird-dev"
     data_root: str = "data/bird"
     limit: int | None = None
+    sample: int | None = Field(
+        None, description="Score a fixed random sample of this many questions (e.g. a BIRD train tuning set)."
+    )
+    sample_seed: int = 0
+    drop_bad_gold: bool = Field(
+        False, description="Skip questions whose gold query fails or returns no rows (for tuning sets only)."
+    )
     batch_size: int = 64
     prompt: PromptSpec = Field(default_factory=PromptSpec)
     decoding: DecodingSpec = Field(default_factory=DecodingSpec)
     pricing: PricingSpec = Field(default_factory=PricingSpec)
     schema_cache_dir: str | None = ".cache/schemas"
+    agent: AgentSpec | None = Field(
+        None, description="Run the agent (tools, attempts, selection) on this model."
+    )
 
     @classmethod
     def from_yaml(cls, path: str | Path, sets: Sequence[str] = (), **overrides: Any) -> EvalConfig:

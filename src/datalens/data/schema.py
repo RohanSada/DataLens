@@ -12,6 +12,7 @@ import csv
 import json
 import re
 import sqlite3
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -100,8 +101,17 @@ class DatabaseSchema:
         descriptions: bool = False,
         max_example_chars: int = 40,
         max_description_chars: int = 120,
+        matched: Mapping[str, Sequence[str]] | None = None,
+        max_matched_examples: int = 6,
     ) -> str:
-        """Render ``CREATE TABLE`` statements with per-column comments."""
+        """Render ``CREATE TABLE`` statements with per-column comments.
+
+        ``matched`` maps ``"table.column"`` (lower case) to database values found
+        in the question. They are listed first among a column's examples, as
+        OmniSQL and Agentar-Scale-SQL do, so the model sees the literal it needs
+        without the prompt changing shape. Columns without a match keep their
+        usual examples, so ``matched=None`` renders exactly the training prompt.
+        """
         blocks = []
         for table in self.tables:
             lines = []
@@ -112,10 +122,9 @@ class DatabaseSchema:
                     notes.append(_truncate(col.description, max_description_chars))
                 if descriptions and col.value_description:
                     notes.append("values: " + _truncate(col.value_description, max_description_chars))
-                if examples and col.examples:
-                    shown = [
-                        _truncate(v, max_example_chars) if isinstance(v, str) else v for v in col.examples
-                    ]
+                values = _column_values(table.name, col, matched, max_matched_examples)
+                if examples and values:
+                    shown = [_truncate(v, max_example_chars) if isinstance(v, str) else v for v in values]
                     notes.append("example: " + json.dumps(shown, ensure_ascii=False))
                 if notes:
                     line += " -- " + "; ".join(notes)
@@ -135,6 +144,92 @@ class DatabaseSchema:
                 lines[-1] = head.rstrip(",") + (sep + comment if sep else "")
             blocks.append(f"CREATE TABLE {quote_ident(table.name)} (\n" + "\n".join(lines) + "\n);")
         return "\n\n".join(blocks)
+
+    def render_light(
+        self,
+        *,
+        examples: bool = True,
+        descriptions: bool = True,
+        max_example_chars: int = 32,
+        max_description_chars: int = 160,
+        matched: Mapping[str, Sequence[str]] | None = None,
+        max_matched_examples: int = 6,
+    ) -> str:
+        """Render the Markdown "light schema" of Agentar-Scale-SQL.
+
+        One section per table with a column table (name, type, description, value
+        examples) and the primary and foreign keys. The paper pairs this format
+        with general-purpose LLMs prompted with examples, and DDL with the model
+        fine-tuned on DDL. ``matched`` works as in :meth:`render`.
+        """
+        foreign: dict[str, list[str]] = {t.name: [] for t in self.tables}
+        for table in self.tables:
+            for fk in table.foreign_keys:
+                link = f"{table.name}.{fk.column} = {fk.ref_table}.{fk.ref_column}"
+                foreign[table.name].append(link)
+                if fk.ref_table in foreign and fk.ref_table != table.name:
+                    foreign[fk.ref_table].append(link)
+
+        blocks = []
+        for table in self.tables:
+            rows = []
+            for col in table.columns:
+                notes = []
+                if descriptions and col.description:
+                    notes.append(_truncate(col.description, max_description_chars))
+                if descriptions and col.value_description:
+                    notes.append("values: " + _truncate(col.value_description, max_description_chars))
+                values = _column_values(table.name, col, matched, max_matched_examples) if examples else []
+                shown = [_truncate(v, max_example_chars) if isinstance(v, str) else v for v in values]
+                rows.append(
+                    [col.name, col.type or "TEXT", "; ".join(notes), json.dumps(shown, ensure_ascii=False)]
+                )
+            parts = [
+                f"## Table: {table.name}",
+                "### Column information",
+                _markdown_table(["column_name", "column_type", "column_description", "value_examples"], rows),
+            ]
+            pks = [c.name for c in table.columns if c.primary_key]
+            if pks:
+                parts += ["### Primary keys", json.dumps(pks, ensure_ascii=False)]
+            links = list(dict.fromkeys(foreign[table.name]))
+            if links:
+                parts += ["### Foreign keys", json.dumps(links, ensure_ascii=False)]
+            blocks.append("\n".join(parts))
+        return "\n\n".join(blocks)
+
+    def column_names(self) -> set[str]:
+        """All column names, lower case."""
+        return {c.name.lower() for t in self.tables for c in t.columns}
+
+
+def _column_values(
+    table: str,
+    col: Column,
+    matched: Mapping[str, Sequence[str]] | None,
+    limit: int,
+) -> list[str | int | float]:
+    """A column's matched values first, then its sampled examples, without repeats."""
+    hits = matched.get(f"{table}.{col.name}".lower()) if matched else None
+    if not hits:
+        return list(col.examples)
+    merged: list[str | int | float] = []
+    seen: set[str] = set()
+    for value in [*hits, *col.examples]:
+        key = str(value)
+        if key not in seen:
+            seen.add(key)
+            merged.append(value)
+    return merged[:limit]
+
+
+def _markdown_table(header: list[str], rows: list[list[str]]) -> str:
+    def cell(text: str) -> str:
+        return " ".join(str(text).split()).replace("|", "\\|")
+
+    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    lines += ["| " + " | ".join(cell(c) for c in row) + " |" for row in rows]
+    return "\n".join(lines)
 
 
 def _truncate(text: str, limit: int) -> str:

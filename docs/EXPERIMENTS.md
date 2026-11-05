@@ -22,6 +22,7 @@ executing the predicted query.
 | H3 | Extra test-time compute (self-consistency) helps the small model more than it costs. | maj@k for k = 1 to 16 vs cost |
 | H4 | The small model needs only part of BIRD train to cross the frontier model. | Learning curve over 10/25/50/100% of train |
 | H5 | The advantage shrinks on a different benchmark (Spider), i.e. it is task-specific. | EX on Spider dev, same models, no retraining |
+| H6 | Agentar-Scale-SQL's orchestrated test-time scaling, built from 3B models only, lifts the GRPO model above its own 16-vote self-consistency. | EX of the agent vs GRPO SC@16, paired McNemar; the paper's ablations |
 
 Each is falsifiable, and a "no" is a publishable answer too.
 
@@ -48,6 +49,10 @@ is asked to reason first and then answer.
 | Frontier, API | `configs/eval/frontier-claude-*.yaml` | `ANTHROPIC_API_KEY` |
 | Frontier, open weights | `configs/eval/frontier-qwen2.5-coder-32b.yaml` | 80GB GPU |
 | Transfer | any eval config with `--benchmark spider-dev --data-root data/spider` | Spider downloaded manually |
+| Agent, untrained selector | `configs/agent/agentar-qwen2.5-coder-3b-zeroshot.yaml` | GPU, the GRPO adapter |
+| Selector data and training | `configs/agent/agentar-qwen2.5-coder-3b-train.yaml`, `configs/train/grpo-selector-qwen2.5-coder-3b.yaml` | GPU, BIRD train |
+| Agent, GRPO selector | `configs/agent/agentar-qwen2.5-coder-3b.yaml` | GPU, both adapters |
+| Agent without task understanding | the above with `--set understanding.enabled=false` | GPU |
 
 Learning-curve runs reuse one config with overrides, for example:
 
@@ -64,6 +69,12 @@ done
 
 Subsets are nested (the 10% subset is inside the 25% subset, and so on) so the curve measures data
 quantity, not which questions happened to be drawn.
+
+For H6 the two agent runs share their candidates: the GRPO-selector run copies the stage files of the
+untrained-selector run and reruns only selection, so the two differ in the selector alone. The paper's
+other ablations (no reasoning generator, no ICL generator, no refinement, voting instead of the
+tournament) are re-scored from the full run by `datalens agent analyze`, which also tests the agent
+against `runs/grpo-qwen2.5-coder-3b` with `--baseline`. See [AGENT.md](AGENT.md).
 
 ## Metrics
 
@@ -116,5 +127,8 @@ Prices change; the configs carry the prices used so a reader can recompute.
 * **Reasoning budget.** Claude models think internally before answering (effort `high` here); the
   small models reason in visible `<think>` tags within 2,048 tokens. Neither is capped to match the
   other; the cost columns make the trade-off visible.
+* **Agent ablations are re-scored, not rerun.** Dropping a generator re-scores the tournament with the
+  judgments already made; a true rerun could show the selector different representative queries.
+  Task understanding is the exception and gets its own run.
 * **Single seed.** GRPO results come from one training seed per size. Seed variance is a known issue
   in RL fine-tuning; re-running the 3B config with two more seeds is the cheapest robustness check.

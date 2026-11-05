@@ -182,3 +182,54 @@ def test_grpo_rerun_resumes_from_the_last_checkpoint(tmp_path, bird_root, monkey
     assert f"resuming from {out / 'checkpoint-2'}" in caplog.text
     assert json.loads((out / "trainer_state.json").read_text())["global_step"] == 3
     assert 2 * len(scored) == first_run, "only the one new step should run"
+
+
+def test_grpo_selector_smoke(tmp_path, bird_root, monkeypatch):
+    """The Agentar-Scale-SQL selector trains through the same GRPO path, rewarded for the
+    right \\boxed{} label of two candidates."""
+    from datalens.agent.prompts import ShownCandidate, selector_prompt
+    from datalens.data.benchmarks import bird_spec, load_examples
+
+    monkeypatch.chdir(tmp_path)
+    records = []
+    for i, ex in enumerate(load_examples(bird_spec(bird_root, "dev"))):
+        shown = [ShownCandidate(ex.gold_sql, "Rows: 1"), ShownCandidate("SELECT 1", "Rows: 1")]
+        if i % 2:
+            shown.reverse()
+        prompt = selector_prompt("## Table: customers", "None", ex.question, ex.evidence, shown)
+        records.append({"id": f"pair-{i}", "prompt": prompt.messages(), "label": "2" if i % 2 else "1"})
+    records_file = tmp_path / "pairs.jsonl"
+    records_file.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+    corpus = _corpus(bird_root) + [m["content"] for r in records for m in r["prompt"]]
+    model, tokenizer = tiny_model_and_tokenizer(corpus)
+    config = TrainConfig.model_validate(
+        {
+            "run_name": "smoke-selector",
+            "method": "grpo",
+            "task": "selection",
+            "model": "tiny",
+            "output_dir": str(tmp_path / "out-selector"),
+            "data": {"records_file": str(records_file)},
+            "lora": {"r": 4, "alpha": 8, "dropout": 0.0},
+            "export": {"merge_lora": False},
+            "trainer": {
+                "max_steps": 2,
+                "learning_rate": 1e-3,
+                "logging_steps": 1,
+                "save_strategy": "no",
+                "report_to": "none",
+                "use_cpu": True,
+                "bf16": False,
+                "gradient_checkpointing": False,
+                "per_device_train_batch_size": 4,
+                "num_generations": 2,
+                "max_completion_length": 12,
+            },
+        }
+    )
+    out = run(config, model=model, tokenizer=tokenizer)
+    state = json.loads((out / "trainer_state.json").read_text())
+    logged = [h for h in state["log_history"] if "select/accuracy" in h]
+    assert logged, "the selection reward should log its metrics during training"
+    assert sorted(json.loads((out / "train_ids.json").read_text())) == [f"pair-{i}" for i in range(4)]

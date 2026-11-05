@@ -14,10 +14,12 @@ Heavy SDKs are imported lazily so the core package installs without them.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from datalens.prompts import PromptParts
@@ -95,6 +97,10 @@ class VLLMBackend:
 
     Latency is the batch wall time divided by batch size. That is the amortised
     GPU time per question, which is what cost-per-query is computed from.
+
+    With ``enable_lora=True`` in the engine arguments, ``generate`` can apply a
+    LoRA adapter per call, so one engine serves a base model and several
+    fine-tuned adapters of it (the agent pipeline's generator and selector).
     """
 
     def __init__(self, model: str, **engine_kwargs: Any) -> None:
@@ -102,9 +108,54 @@ class VLLMBackend:
 
         engine_kwargs.setdefault("enable_prefix_caching", True)
         self.name = model
-        self.llm = LLM(model=model, **engine_kwargs)
+        self.max_model_len: int | None = engine_kwargs.get("max_model_len")
+        self.llm: Any = LLM(model=model, **engine_kwargs)
+        self._loras: dict[str, Any] = {}
 
-    def generate(self, prompts: Sequence[PromptParts], sampling: SamplingConfig) -> list[Generation]:
+    def _lora_request(self, path: str) -> Any:
+        from vllm.lora.request import LoRARequest
+
+        if path not in self._loras:
+            lora_id = len(self._loras) + 1
+            local = Path(path)
+            target = str(local.resolve()) if local.exists() else path  # a local folder, or a Hub id
+            self._loras[path] = LoRARequest(
+                lora_name=f"adapter{lora_id}", lora_int_id=lora_id, lora_path=target
+            )
+        return self._loras[path]
+
+    def count_tokens(self, prompt: PromptParts) -> int:
+        """Prompt length in tokens after the chat template, as vLLM will see it."""
+        ids = self.llm.get_tokenizer().apply_chat_template(
+            prompt.messages(), tokenize=True, add_generation_prompt=True
+        )
+        if hasattr(ids, "keys") and "input_ids" in ids:
+            ids = ids["input_ids"]
+        return len(ids)
+
+    def close(self) -> None:
+        """Shut the engine down and free its GPU memory (best effort)."""
+        import gc
+
+        llm, self.llm = self.llm, None
+        engine = getattr(llm, "llm_engine", None)
+        shutdown = getattr(getattr(engine, "engine_core", None), "shutdown", None)
+        if callable(shutdown):
+            with contextlib.suppress(Exception):  # freeing memory must not fail the run
+                shutdown()
+        del llm, engine
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+    def generate(
+        self, prompts: Sequence[PromptParts], sampling: SamplingConfig, *, lora_path: str | None = None
+    ) -> list[Generation]:
         from vllm import SamplingParams
 
         greedy = not sampling.temperature
@@ -115,8 +166,9 @@ class VLLMBackend:
             max_tokens=sampling.max_tokens,
             seed=sampling.seed,
         )
+        extra: dict[str, Any] = {"lora_request": self._lora_request(lora_path)} if lora_path else {}
         start = time.perf_counter()
-        outputs = self.llm.chat([p.messages() for p in prompts], params, use_tqdm=False)
+        outputs = self.llm.chat([p.messages() for p in prompts], params, use_tqdm=False, **extra)
         per_prompt = (time.perf_counter() - start) / max(len(prompts), 1)
         return [
             Generation(

@@ -87,6 +87,13 @@ Two queries that differ in text but return the same rows count as the same answe
 makes this stronger than text-level majority voting. The API uses the same procedure, and the demo
 page shows the vote.
 
+## Inference: the Agentar-Scale-SQL pipeline
+
+Self-consistency is the simplest way to spend test-time compute. The repository also replicates
+Agentar-Scale-SQL around the trained model. It adds two generators, execution-driven repair, and a
+pairwise tournament judged by a selector that GRPO trains with this same code
+(`task: selection`). See [AGENT.md](AGENT.md).
+
 ## Baselines
 
 * **Zero-shot base model**: the same Qwen2.5-Coder checkpoint before any training.

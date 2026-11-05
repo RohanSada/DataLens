@@ -142,6 +142,36 @@ def build_records(
     return records
 
 
+def load_records(
+    spec: DataSpec,
+    *,
+    count_tokens: Callable[[Messages], int] | None = None,
+) -> list[dict[str, Any]]:
+    """Ready-made prompt records (selector training) with the data filters that apply.
+
+    ``train_fraction`` keeps a fixed-seed prefix, ``limit`` caps the count, and
+    prompts over ``max_prompt_tokens`` are dropped rather than truncated.
+    """
+    assert spec.records_file is not None
+    lines = Path(spec.records_file).read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines if line.strip()]
+    total = len(records)
+    records = sorted(records, key=lambda r: r["id"])
+    random.Random(spec.seed).shuffle(records)
+    records = records[: max(1, round(len(records) * spec.train_fraction))]
+    if spec.limit is not None:
+        records = records[: spec.limit]
+    if count_tokens is not None:
+        kept = [r for r in records if count_tokens(r["prompt"]) <= spec.max_prompt_tokens]
+        if len(kept) < len(records):
+            log.info(
+                "dropped %d records over %d prompt tokens", len(records) - len(kept), spec.max_prompt_tokens
+            )
+        records = kept
+    log.info("training records: %d of %d", len(records), total)
+    return [{"id": r["id"], "prompt": r["prompt"], "label": str(r["label"])} for r in records]
+
+
 def exclusion_ids_from_run(scored_path: str | Path, *, low: float = 0.0, high: float = 1.0) -> list[str]:
     """Ids whose sampled pass rate is ``<= low`` or ``>= high`` in a scored run.
 

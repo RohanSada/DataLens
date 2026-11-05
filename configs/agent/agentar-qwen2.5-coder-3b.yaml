@@ -1,0 +1,87 @@
+# Agentar-Scale-SQL (Wang et al., 2025; #1 on BIRD when published) replicated around the 3B GRPO model.
+#
+# Paper role            -> model here
+#   task understanding   Gemini-2.5-Flash           -> Qwen2.5-Coder-3B-Instruct
+#   reasoning generator  GRPO-trained OmniSQL-32B   -> your GRPO-trained Qwen2.5-Coder-3B (LoRA adapter)
+#   ICL generator        Gemini-2.5-Pro + GPT-5     -> Qwen2.5-Coder-3B-Instruct
+#   fixer / reviser      Gemini-2.5-Pro             -> Qwen2.5-Coder-3B-Instruct
+#   selector             GRPO-trained Qwen2.5-Coder-32B -> GRPO-trained Qwen2.5-Coder-3B (LoRA adapter)
+#
+# Every role runs on one vLLM engine: the base model, with the two fine-tuned adapters
+# applied per request. Train the selector first (configs/train/grpo-selector-qwen2.5-coder-3b.yaml),
+# or run agentar-qwen2.5-coder-3b-zeroshot.yaml, which uses the untrained base model as selector.
+run_name: agentar-qwen2.5-coder-3b
+name: Qwen2.5-Coder-3B GRPO + Agentar-Scale
+params_b: 3
+training: grpo+agentar
+benchmark: bird-dev
+data_root: data/bird
+batch_size: 128                # questions per chunk; results are saved after each one
+
+models:
+  qwen3b:
+    backend: vllm
+    model: Qwen/Qwen2.5-Coder-3B-Instruct
+    backend_kwargs:
+      max_model_len: 32768     # light schemas of the widest BIRD tables run past 16k tokens
+      gpu_memory_utilization: 0.85
+      enable_lora: true
+      max_lora_rank: 32        # the adapters are rank 32
+      max_loras: 2
+  # Without LoRA serving, point roles at merged checkpoints instead, one model per entry
+  # (e.g. grpo: {backend: vllm, model: checkpoints/grpo-qwen2.5-coder-3b/merged}); the
+  # runner frees each model before loading the next.
+
+roles:
+  understanding: {model: qwen3b}
+  reasoning_generator: {model: qwen3b, lora: checkpoints/grpo-qwen2.5-coder-3b}
+  icl_generator: {model: qwen3b}
+  fixer: {model: qwen3b}
+  revisor: {model: qwen3b}
+  selector: {model: qwen3b, lora: checkpoints/grpo-selector-qwen2.5-coder-3b}
+
+understanding:
+  llm: true                    # literals + question skeleton from the model (paper Fig. 9)
+  value_retrieval: true        # matched contents (OmniSQL rule: >85% of the value in the question)
+  examples: 3                  # few-shot examples from BIRD train, by skeleton similarity
+  example_split: bird-train
+  example_skeletons: llm
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+
+reasoning:                     # 8 candidates, as in the paper
+  n: 8
+  temperature: 0.8
+  max_tokens: 2048
+  matched_values: true         # matched values go first among the column examples of the DDL
+
+icl:                           # 9 candidates: 3 prompt styles x 3 temperatures, examples shuffled
+  variants:
+    - {style: direct, temperature: 0.2}
+    - {style: direct, temperature: 0.6}
+    - {style: direct, temperature: 1.0}
+    - {style: cot, temperature: 0.2}
+    - {style: cot, temperature: 0.6}
+    - {style: cot, temperature: 1.0}
+    - {style: decompose, temperature: 0.2}
+    - {style: decompose, temperature: 0.6}
+    - {style: decompose, temperature: 1.0}
+  max_tokens: 2048
+
+refinement:
+  fixer: true                  # errors and empty results
+  revisor: true                # one query per result group
+  max_rounds: 2
+
+selection:
+  method: tournament           # or "vote" for plain self-consistency
+  max_candidates: 16           # most-voted result groups in the round-robin (<= 120 pairs)
+  temperature: 0.0
+  max_tokens: 1024
+
+execution:
+  timeout_s: 30
+  workers: 8
+
+pricing:
+  gpu_hourly_usd: 1.5          # what your GPU costs per hour; edit to match
+  num_gpus: 1

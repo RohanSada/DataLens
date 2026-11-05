@@ -125,6 +125,37 @@ class ExecutionReward:
         return rewards
 
 
+class SelectionReward:
+    """Reward for the SQL selector (Agentar-Scale-SQL's R_S): 1 when it picks the right query.
+
+    The completion must end its answer with ``\\boxed{n}``; the dataset's ``label``
+    column holds the position ("1" or "2") of the correct candidate.
+    """
+
+    __name__ = "selection_reward"
+
+    def __call__(
+        self,
+        prompts: list[Any] | None = None,
+        completions: list[Any] | None = None,
+        *,
+        label: list[str],
+        log_metric: Callable[[str, float], None] | None = None,
+        **_: Any,
+    ) -> list[float]:
+        from datalens.agent.selection import parse_choice
+
+        choices = [parse_choice(completion_text(c), 2, strict=True) for c in completions or []]
+        rewards = [
+            1.0 if choice is not None and str(choice) == str(gold) else 0.0
+            for choice, gold in zip(choices, label, strict=True)
+        ]
+        if log_metric is not None and rewards:
+            log_metric("select/accuracy", sum(rewards) / len(rewards))
+            log_metric("select/answered", sum(c is not None for c in choices) / len(choices))
+        return rewards
+
+
 _FORMAT_RE = re.compile(r"^\s*<think>.+?</think>\s*```sql\s*\n.+?```\s*$", re.DOTALL)
 
 

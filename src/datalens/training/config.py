@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from datalens.config_utils import apply_overrides, load_yaml
 from datalens.eval.config import PromptSpec
@@ -37,6 +37,10 @@ class DataSpec(_Strict):
     )
     exclude_ids_file: str | None = Field(
         None, description="Text file of example ids to skip, e.g. ones the base model always solves."
+    )
+    records_file: str | None = Field(
+        None,
+        description="JSONL of ready-made prompts (task: selection), from `datalens agent selector-data`.",
     )
     gold_timeout_s: float = 60.0
     schema_cache_dir: str | None = ".cache/schemas"
@@ -67,6 +71,11 @@ class ExportSpec(_Strict):
 class TrainConfig(_Strict):
     run_name: str
     method: Literal["sft", "grpo"]
+    task: Literal["sql", "selection"] = Field(
+        "sql",
+        description="sql: write the query (execution reward). selection: pick the right one of two "
+        "queries (the Agentar-Scale-SQL selector; GRPO only, data from data.records_file).",
+    )
     model: str = Field(description="Base model: Hugging Face id or local path.")
     output_dir: str
     data: DataSpec = Field(default_factory=DataSpec)
@@ -78,6 +87,17 @@ class TrainConfig(_Strict):
     resume: bool = Field(
         True, description="Continue from the newest checkpoint in output_dir, e.g. after a disconnect."
     )
+
+    @model_validator(mode="after")
+    def _check_task(self) -> TrainConfig:
+        if self.task == "selection":
+            if self.method != "grpo":
+                raise ValueError("task: selection is trained with method: grpo")
+            if not self.data.records_file:
+                raise ValueError(
+                    "task: selection needs data.records_file (see `datalens agent selector-data`)"
+                )
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path, sets: Sequence[str] = ()) -> TrainConfig:

@@ -14,9 +14,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from datalens.rewards import ExecutionReward, RewardConfig, format_reward
+from datalens.rewards import ExecutionReward, RewardConfig, SelectionReward, format_reward
 from datalens.training.config import TrainConfig
-from datalens.training.data import Messages, build_records, select_examples
+from datalens.training.data import Messages, build_records, load_records, select_examples
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,12 @@ def _peft_config(config: TrainConfig) -> Any:
 def build_dataset(config: TrainConfig, tokenizer: Any) -> Any:
     from datasets import Dataset
 
+    if config.task == "selection":
+        records = load_records(config.data, count_tokens=_token_counter(tokenizer))
+        if not records:
+            raise ValueError("no selector records left after filtering")
+        return Dataset.from_list(records)
+
     examples = select_examples(config.data)
     records = build_records(
         examples,
@@ -91,18 +97,23 @@ def make_trainer(config: TrainConfig, dataset: Any, tokenizer: Any, model: Any =
 
     from trl import GRPOConfig, GRPOTrainer
 
-    reward = ExecutionReward(
-        RewardConfig(
-            correct=config.reward.correct,
-            executable=config.reward.executable,
-            invalid=config.reward.invalid,
-            timeout_s=config.reward.timeout_s,
-            num_workers=config.reward.num_workers,
-            max_rows=config.reward.max_rows,
-        )
-    )
-    reward_funcs: list[Any] = [reward]
-    if config.reward.format_weight > 0:
+    reward_funcs: list[Any]
+    if config.task == "selection":
+        reward_funcs = [SelectionReward()]
+    else:
+        reward_funcs = [
+            ExecutionReward(
+                RewardConfig(
+                    correct=config.reward.correct,
+                    executable=config.reward.executable,
+                    invalid=config.reward.invalid,
+                    timeout_s=config.reward.timeout_s,
+                    num_workers=config.reward.num_workers,
+                    max_rows=config.reward.max_rows,
+                )
+            )
+        ]
+    if config.task == "sql" and config.reward.format_weight > 0:
         reward_funcs.append(format_reward)
         trainer_args.setdefault("reward_weights", [1.0, config.reward.format_weight])
     return GRPOTrainer(

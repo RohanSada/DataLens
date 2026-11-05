@@ -28,6 +28,8 @@ question + schema ──▶ small model ──▶ 8 SQL candidates ──▶ run
 | Qwen2.5-Coder-3B | 3B | none | 37.2 (34.7–39.6) | 44.4 | 26.9 | 23.4 | 54.4 | $0.025 |
 | Qwen2.5-Coder-3B | 3B | SFT | 50.8 (48.3–53.3) | 58.1 | 40.9 | 35.9 | 56.5 | $0.015 |
 | Qwen2.5-Coder-3B | 3B | **GRPO** | **51.8** (49.2–54.2) | **58.4** | **42.5** | **39.3** | **60.0** | $0.013 |
+| Qwen2.5-Coder-3B | 3B | GRPO + Agentar-Scale, untrained selector | not run yet | | | | | |
+| Qwen2.5-Coder-3B | 3B | GRPO + Agentar-Scale, GRPO selector | not run yet | | | | | |
 | Qwen2.5-Coder-7B | 7B | **GRPO** | not run yet | | | | | |
 | Qwen2.5-Coder-32B | 32B | none | not run yet | | | | | |
 | Claude Sonnet 5.5 | undisclosed | none | not run yet | | | | | |
@@ -51,6 +53,9 @@ What the 3B runs show so far:
 * **The gap grows with sampling.** With 16 votes GRPO reaches 60.0%, against 56.5% for SFT and
   54.4% for the base model, for $0.20 per 1k queries. The report has no paired test of GRPO
   against SFT yet.
+* **Voting leaves accuracy on the table.** 74.7% of questions have a correct query among GRPO's 16
+  samples, but the vote picks one only 60.0% of the time. The Agentar-Scale-SQL pipeline below
+  targets that gap with more diverse candidates, execution-driven repair and a trained selector.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="reports/bird-dev/figures/self_consistency-dark.png">
@@ -67,6 +72,7 @@ What the 3B runs show so far:
 | | |
 |---|---|
 | **Method** | GRPO with an execution reward (Arctic-Text2SQL-R1 recipe), DAPO-style clipping and loss, LoRA, vLLM rollouts. [docs/METHOD.md](docs/METHOD.md) |
+| **Agentic inference** | Agentar-Scale-SQL (#1 on BIRD when published) around the GRPO model: value retrieval and skeleton-based examples, two generators, an execution-driven fixer and reviser, a pairwise tournament judged by a GRPO-trained selector, and the paper's ablations. [docs/AGENT.md](docs/AGENT.md) |
 | **Data pipeline** | BIRD download and normalisation, schema rendering with example values, gold-query filtering, nested subsets for learning curves |
 | **Evaluation** | Official EX semantics, Soft-F1, R-VES, bootstrap CIs, McNemar, maj@k / pass@k, error taxonomy, schema-link recall, $ and latency |
 | **Comparison** | One harness, one prompt, any model: local (vLLM), OpenAI-compatible servers, Claude (with prompt caching) |
@@ -90,12 +96,18 @@ datalens eval run configs/eval/grpo-qwen2.5-coder-3b.yaml
 # Frontier baselines (needs ANTHROPIC_API_KEY)
 datalens eval run configs/eval/frontier-claude-sonnet-5-5.yaml
 
+# Agentar-Scale-SQL around the GRPO model (docs/AGENT.md), then paper-style ablations
+datalens agent run configs/agent/agentar-qwen2.5-coder-3b-zeroshot.yaml
+datalens eval score runs/agentar-qwen2.5-coder-3b-zeroshot
+datalens agent analyze runs/agentar-qwen2.5-coder-3b-zeroshot --baseline runs/grpo-qwen2.5-coder-3b
+
 # Compare everything: tables, significance tests, figures
 datalens eval report runs/* --out reports/bird-dev
 ```
 
 No GPU? Open [`notebooks/colab_train_and_eval.ipynb`](notebooks/colab_train_and_eval.ipynb) in
-Colab with an A100 runtime. Any config value can be overridden from the command line, e.g.
+Colab with an A100 runtime, then [`notebooks/colab_agent.ipynb`](notebooks/colab_agent.ipynb)
+for the agent. Any config value can be overridden from the command line, e.g.
 `--set trainer.learning_rate=2e-5` or `--set data.train_fraction=0.25`.
 
 ## Serve it
@@ -129,11 +141,13 @@ src/datalens/
   prompts.py   the one prompt every model sees
   rewards.py   execution reward for GRPO
   training/    SFT and GRPO (TRL + PEFT), data filtering
-  inference/   model backends (vLLM, OpenAI-compatible, Anthropic) and self-consistency voting
+  inference/   model backends (vLLM with LoRA adapters, OpenAI-compatible, Anthropic) and voting
+  agent/       Agentar-Scale-SQL: value and example retrieval, generators, fixer and reviser,
+               tournament selection, selector training data, ablations
   eval/        generate -> score -> metrics -> report, statistics, figures
   serving/     FastAPI app, engine, demo page
-configs/       one YAML per training run and per evaluated model
-notebooks/     Colab runbook for the full experiment
+configs/       one YAML per training run, evaluated model and agent pipeline
+notebooks/     Colab runbooks: training and evaluation, then the agent
 docs/          method and experiment plan
 ```
 
@@ -174,3 +188,9 @@ Results come from one prompt and one training seed per model size. All of these 
 * Li et al., *OmniSQL: Synthesizing High-quality Text-to-SQL Data at Scale*, 2025.
 * Pourreza et al., *CHASE-SQL: Multi-Path Reasoning and Preference Optimized Candidate Selection in
   Text-to-SQL*, 2024.
+* Wang et al., *Agentar-Scale-SQL: Advancing Text-to-SQL through Orchestrated Test-Time Scaling*, 2025.
+  [arXiv:2509.24403](https://arxiv.org/abs/2509.24403)
+* Sheng and Xu, *CSC-SQL: Corrective Self-Consistency in Text-to-SQL via Reinforcement Learning*, 2025.
+  [arXiv:2505.13271](https://arxiv.org/abs/2505.13271)
+* Gao et al., *Text-to-SQL Empowered by Large Language Models: A Benchmark Evaluation* (DAIL-SQL,
+  skeleton-based example selection), VLDB 2024. [arXiv:2308.15363](https://arxiv.org/abs/2308.15363)

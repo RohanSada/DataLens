@@ -38,6 +38,8 @@ train = [
     # TRL's trainers run a Triton kernel. CUDA builds of torch bring Triton; CPU builds don't.
     "triton; sys_platform == 'linux'",
 ]
+# The Agentar-Scale-SQL pipeline's few-shot retrieval (falls back to TF-IDF without it).
+agent = ["sentence-transformers>=3.0"]
 # Fast local generation for evaluation and GRPO rollouts (Linux + CUDA only).
 # Installed through TRL so the vLLM version is one its GRPO trainer supports.
 vllm = ["trl[vllm]>=1.0"]

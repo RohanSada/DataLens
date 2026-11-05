@@ -14,9 +14,14 @@ app = typer.Typer(
 data_app = typer.Typer(help="Download and prepare benchmarks.", no_args_is_help=True)
 train_app = typer.Typer(help="Fine-tune models (SFT, GRPO).", no_args_is_help=True)
 eval_app = typer.Typer(help="Generate, score and compare evaluation runs.", no_args_is_help=True)
+agent_app = typer.Typer(
+    help="Agentar-Scale-SQL pipeline (orchestrated test-time scaling) around a trained model.",
+    no_args_is_help=True,
+)
 app.add_typer(data_app, name="data")
 app.add_typer(train_app, name="train")
 app.add_typer(eval_app, name="eval")
+app.add_typer(agent_app, name="agent")
 
 
 @app.callback()
@@ -192,6 +197,117 @@ def eval_report(
     from datalens.eval.report import build_report
 
     typer.echo(f"wrote {build_report(run_dirs, out, plots=not no_plots)}")
+
+
+# ---------------------------------------------------------------- agent
+
+
+StageOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--stage",
+        help="Run only these stages (understand, reason, icl, refine, select); repeatable. "
+        "Default: all, in order. Each stage resumes where it stopped.",
+    ),
+]
+
+
+@agent_app.command("run")
+def agent_run(
+    config: Annotated[
+        Path, typer.Argument(help="Agent YAML, e.g. configs/agent/agentar-qwen2.5-coder-3b.yaml.")
+    ],
+    runs: Annotated[Path, typer.Option(help="Root folder for run outputs.")] = Path("runs"),
+    stage: StageOption = None,
+    limit: Annotated[int | None, typer.Option(help="Only the first N questions.")] = None,
+    benchmark: Annotated[str | None, typer.Option(help="Override, e.g. bird-train.")] = None,
+    data_root: Annotated[str | None, typer.Option(help="Override the data folder.")] = None,
+    run_name: Annotated[str | None, typer.Option(help="Override the run name.")] = None,
+    set_: SetOption = None,
+) -> None:
+    """Run the pipeline (resumable), then write generations.jsonl for `datalens eval score`."""
+    from datalens.agent.config import AgentConfig
+    from datalens.agent.pipeline import AgentRun
+
+    cfg = AgentConfig.from_yaml(
+        config, set_ or [], limit=limit, benchmark=benchmark, data_root=data_root, run_name=run_name
+    )
+    out = AgentRun(cfg, runs).run(stage or None)
+    typer.echo(f"run: {out}")
+    typer.echo(f"next: datalens eval score {out} && datalens agent analyze {out}")
+
+
+@agent_app.command("index")
+def agent_index(
+    config: Annotated[Path, typer.Argument(help="Agent YAML.")],
+    benchmark: Annotated[str | None, typer.Option(help="Override, e.g. bird-train.")] = None,
+    set_: SetOption = None,
+) -> None:
+    """Offline preprocessing: value indexes of the benchmark's databases and the few-shot example store.
+
+    Optional: `agent run` builds both on first use. Running this first moves the
+    one-off cost out of the timed run (the example store needs the understanding model).
+    """
+    from datalens.agent.config import AgentConfig
+    from datalens.agent.pipeline import AgentRun
+    from datalens.agent.values import load_value_index
+
+    cfg = AgentConfig.from_yaml(config, set_ or [], benchmark=benchmark)
+    run = AgentRun(cfg)
+    if cfg.understanding.enabled and cfg.understanding.value_retrieval:
+        paths = sorted({e.db_path for e in run.examples()})
+        for i, path in enumerate(paths, 1):
+            index = load_value_index(path, cache_dir=cfg.index_dir)
+            typer.echo(f"[{i}/{len(paths)}] {path.stem}: {len(index):,} values")
+    if cfg.understanding.enabled and cfg.understanding.examples > 0 and cfg.icl.enabled:
+        store = run.ctx.example_store()
+        typer.echo(f"example store: {len(store):,} {cfg.understanding.example_split} questions")
+
+
+@agent_app.command("analyze")
+def agent_analyze(
+    run_dir: Annotated[Path, typer.Argument(help="A finished agent run folder.")],
+    compare: Annotated[
+        list[str] | None,
+        typer.Option(help="NAME=RUN_DIR of a separate run to list too, e.g. the no-task-understanding run."),
+    ] = None,
+    baseline: Annotated[
+        Path | None,
+        typer.Option(help="A scored run to test against, paired (e.g. runs/grpo-qwen2.5-coder-3b)."),
+    ] = None,
+) -> None:
+    """Paper-style ablations, generator comparison, selector accuracy and per-stage cost."""
+    from datalens.agent.analysis import ANALYSIS_MD, analyze
+
+    pairs = {}
+    for item in compare or []:
+        name, sep, path = item.partition("=")
+        if not sep:
+            raise typer.BadParameter(f"--compare {item!r} must look like NAME=RUN_DIR")
+        pairs[name] = Path(path)
+    analyze(run_dir, compare=pairs, baseline=baseline)
+    typer.echo((run_dir / ANALYSIS_MD).read_text(encoding="utf-8"))
+
+
+@agent_app.command("selector-data")
+def agent_selector_data(
+    run_dir: Annotated[Path, typer.Argument(help="Agent run on BIRD train (stages understand..refine).")],
+    out: Annotated[Path, typer.Option(help="JSONL for the selector's training config.")] = Path(
+        "data/selector/bird-train-pairs.jsonl"
+    ),
+    pairs_per_question: int = 2,
+    max_records: Annotated[int, typer.Option(help="Cap on samples (the paper uses 8.5k).")] = 8500,
+    seed: int = 0,
+) -> None:
+    """Build GRPO training prompts for the selector: a correct vs a wrong query, random order."""
+    from datalens.agent.selector_data import build_selector_records, write_records
+
+    records = build_selector_records(
+        run_dir, pairs_per_question=pairs_per_question, max_records=max_records, seed=seed
+    )
+    write_records(records, out)
+    first = sum(r["label"] == "1" for r in records)
+    typer.echo(f"wrote {len(records)} samples to {out} ({first} with the correct query first)")
 
 
 # ---------------------------------------------------------------- serve / ask
